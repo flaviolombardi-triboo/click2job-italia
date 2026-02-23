@@ -24,10 +24,17 @@ export default function HeroSearch() {
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28">
         <div className="text-center mb-10">
+          <div className="flex justify-center mb-6">
+            <img
+              src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
+              alt="Click2Job"
+              className="h-14 w-auto brightness-0 invert"
+            />
+          </div>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-white leading-tight tracking-tight">
-            Trova il lavoro
+            Trova le offerte di lavoro
             <br />
-            <span className="text-emerald-200">che fa per te</span>
+            <span style={{ color: "#d4f0da" }}>pubblicate in tutta Italia</span>
           </h1>
           <p className="mt-5 text-lg md:text-xl text-emerald-100/90 max-w-2xl mx-auto font-light">
             Migliaia di offerte di lavoro in tutta Italia, aggiornate ogni giorno
@@ -62,7 +69,8 @@ export default function HeroSearch() {
               </div>
               <Button
                 onClick={handleSearch}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-8 py-4 h-auto rounded-xl text-base shadow-lg shadow-emerald-600/30"
+                className="text-white font-semibold px-8 py-4 h-auto rounded-xl text-base shadow-lg"
+              style={{ backgroundColor: "#3d9152" }}
               >
                 <Search className="w-5 h-5 mr-2" />
                 Cerca
