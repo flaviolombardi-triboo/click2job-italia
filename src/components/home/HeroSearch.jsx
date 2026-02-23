@@ -15,7 +15,7 @@ export default function HeroSearch() {
   };
 
   return (
-    <section className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-emerald-700 to-emerald-800">
+    <section className="relative overflow-hidden" style={{ background: "linear-gradient(135deg, #4fa862 0%, #5aac6b 60%, #3d9152 100%)" }}>
       {/* Background pattern */}
       <div className="absolute inset-0 opacity-10">
         <div className="absolute top-20 left-10 w-72 h-72 bg-white rounded-full blur-3xl" />

@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Search, MapPin, Menu, X, Briefcase, TrendingUp, BookOpen, Building2, ChevronDown } from "lucide-react";
+import { Search, MapPin, Menu, X, TrendingUp, BookOpen, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+// Brand colors from logo: green #5aac6b / #4fa862, text black #111
+const C2J_GREEN = "#5aac6b";
+
 const NAV_ITEMS = [
-  { label: "Offerte di Lavoro", page: "Home", icon: Briefcase },
-  { label: "Stipendi", page: "Stipendi", icon: TrendingUp },
-  { label: "Elenco Professioni", page: "ElencoProfessioni", icon: BookOpen },
-  { label: "Cerca per Città", page: "CercaPerCitta", icon: MapPin },
+  { label: "Offerte di Lavoro", page: "Home" },
+  { label: "Stipendi", page: "Stipendi" },
+  { label: "Elenco Professioni", page: "ElencoProfessioni" },
+  { label: "Cerca per Città", page: "CercaPerCitta" },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -27,19 +30,16 @@ export default function Layout({ children, currentPageName }) {
   return (
     <div className="min-h-screen bg-gray-50/50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 sticky top-0 z-50 backdrop-blur-xl bg-white/95">
+      <header className="bg-white border-b border-gray-100 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link to={createPageUrl("Home")} className="flex items-center gap-2 shrink-0">
-              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
-                <Briefcase className="w-4 h-4 text-white" />
-              </div>
-              <span className="text-xl font-bold tracking-tight">
-                <span className="text-gray-900">Click</span>
-                <span className="text-emerald-600">2</span>
-                <span className="text-gray-900">Job</span>
-              </span>
+              <img
+                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
+                alt="Click2Job"
+                className="h-9 w-auto"
+              />
             </Link>
 
             {/* Desktop Nav */}
@@ -50,9 +50,10 @@ export default function Layout({ children, currentPageName }) {
                   to={createPageUrl(item.page)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     currentPageName === item.page
-                      ? "text-emerald-700 bg-emerald-50"
+                      ? "text-white rounded-lg"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                   }`}
+                  style={currentPageName === item.page ? { backgroundColor: C2J_GREEN } : {}}
                 >
                   {item.label}
                 </Link>
@@ -62,7 +63,11 @@ export default function Layout({ children, currentPageName }) {
             {/* Right side */}
             <div className="hidden lg:flex items-center gap-3">
               <Link to={createPageUrl("PubblicaOfferta")}>
-                <Button variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                <Button
+                  variant="outline"
+                  className="font-semibold border-2"
+                  style={{ borderColor: C2J_GREEN, color: C2J_GREEN }}
+                >
                   <Building2 className="w-4 h-4 mr-2" />
                   Area Aziende
                 </Button>
@@ -88,19 +93,18 @@ export default function Layout({ children, currentPageName }) {
                   key={item.page}
                   to={createPageUrl(item.page)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${
-                    currentPageName === item.page
-                      ? "text-emerald-700 bg-emerald-50"
-                      : "text-gray-600 hover:bg-gray-50"
+                    currentPageName === item.page ? "text-white" : "text-gray-600 hover:bg-gray-50"
                   }`}
+                  style={currentPageName === item.page ? { backgroundColor: C2J_GREEN } : {}}
                   onClick={() => setMobileMenuOpen(false)}
                 >
-                  <item.icon className="w-4 h-4" />
                   {item.label}
                 </Link>
               ))}
               <Link
                 to={createPageUrl("PubblicaOfferta")}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
+                style={{ color: C2J_GREEN }}
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Building2 className="w-4 h-4" />
@@ -112,7 +116,7 @@ export default function Layout({ children, currentPageName }) {
 
         {/* Search Bar (non-home pages) */}
         {!isHome && currentPageName !== "PubblicaOfferta" && currentPageName !== "GestisciFeed" && (
-          <div className="border-t border-gray-100 bg-gradient-to-r from-emerald-600 to-emerald-700">
+          <div className="border-t border-gray-100" style={{ backgroundColor: C2J_GREEN }}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative flex-1">
@@ -123,7 +127,7 @@ export default function Layout({ children, currentPageName }) {
                     value={keyword}
                     onChange={(e) => setKeyword(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/50"
                   />
                 </div>
                 <div className="relative flex-1">
@@ -134,12 +138,13 @@ export default function Layout({ children, currentPageName }) {
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/50"
                   />
                 </div>
                 <Button
                   onClick={handleSearch}
-                  className="bg-white text-emerald-700 hover:bg-emerald-50 font-semibold px-8"
+                  className="bg-white font-semibold px-8"
+                  style={{ color: C2J_GREEN }}
                 >
                   Cerca
                 </Button>
@@ -158,12 +163,11 @@ export default function Layout({ children, currentPageName }) {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
             {/* Brand */}
             <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center">
-                  <Briefcase className="w-4 h-4 text-white" />
-                </div>
-                <span className="text-lg font-bold text-white">Click2Job</span>
-              </div>
+              <img
+                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
+                alt="Click2Job"
+                className="h-8 w-auto mb-4 brightness-0 invert"
+              />
               <p className="text-sm leading-relaxed">
                 Il motore di ricerca lavoro in Italia. Trova migliaia di offerte di lavoro aggiornate ogni giorno.
               </p>
