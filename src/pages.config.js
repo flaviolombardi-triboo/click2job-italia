@@ -53,6 +53,9 @@ import DettaglioOfferta from './pages/DettaglioOfferta';
 import Stipendi from './pages/Stipendi';
 import ElencoProfessioni from './pages/ElencoProfessioni';
 import DettaglioProfessione from './pages/DettaglioProfessione';
+import CercaPerCitta from './pages/CercaPerCitta';
+import PubblicaOfferta from './pages/PubblicaOfferta';
+import GestisciFeed from './pages/GestisciFeed';
 import __Layout from './Layout.jsx';
 
 
@@ -63,6 +66,9 @@ export const PAGES = {
     "Stipendi": Stipendi,
     "ElencoProfessioni": ElencoProfessioni,
     "DettaglioProfessione": DettaglioProfessione,
+    "CercaPerCitta": CercaPerCitta,
+    "PubblicaOfferta": PubblicaOfferta,
+    "GestisciFeed": GestisciFeed,
 }
 
 export const pagesConfig = {
