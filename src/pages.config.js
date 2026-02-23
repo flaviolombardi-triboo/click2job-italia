@@ -50,6 +50,9 @@
 import Home from './pages/Home';
 import RisultatiRicerca from './pages/RisultatiRicerca';
 import DettaglioOfferta from './pages/DettaglioOfferta';
+import Stipendi from './pages/Stipendi';
+import ElencoProfessioni from './pages/ElencoProfessioni';
+import DettaglioProfessione from './pages/DettaglioProfessione';
 import __Layout from './Layout.jsx';
 
 
@@ -57,6 +60,9 @@ export const PAGES = {
     "Home": Home,
     "RisultatiRicerca": RisultatiRicerca,
     "DettaglioOfferta": DettaglioOfferta,
+    "Stipendi": Stipendi,
+    "ElencoProfessioni": ElencoProfessioni,
+    "DettaglioProfessione": DettaglioProfessione,
 }
 
 export const pagesConfig = {
