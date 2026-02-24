@@ -28,7 +28,8 @@ export default function HeroSearch() {
             <img
               src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
               alt="Click2Job"
-              className="h-14 w-auto brightness-0 invert"
+              className="h-14 w-auto"
+              style={{ mixBlendMode: "multiply" }}
             />
           </div>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-white leading-tight tracking-tight">
