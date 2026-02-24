@@ -156,9 +156,11 @@ Deno.serve(async (req) => {
             });
             chunksCreated++;
             currentChunk = [];
+            // Small pause every 10 chunks to avoid rate-limit
+            if (chunksCreated % 10 === 0) await new Promise(r => setTimeout(r, 1000));
           }
 
-          if (totalJobs >= MAX_JOBS) break;
+          if (totalJobs >= MAX_JOBS || chunksCreated >= MAX_CHUNKS_PER_RUN) break;
         }
 
         // Save remaining jobs
