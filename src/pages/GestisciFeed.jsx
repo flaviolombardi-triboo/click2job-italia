@@ -54,26 +54,51 @@ export default function GestisciFeed() {
     },
   });
 
+  const { data: pendingChunks } = useQuery({
+    queryKey: ["pending-chunks"],
+    queryFn: () => base44.entities.FeedChunk.filter({ status: "pending" }),
+    initialData: [],
+    enabled: user?.role === "admin",
+    refetchInterval: 5000,
+  });
+
   const importFeedMutation = useMutation({
     mutationFn: async (feed) => {
       setImportingFeedId(feed.id);
-      const response = await base44.functions.invoke("importFeeds", { feed_id: feed.id });
-      return response.data;
+      // Step 1: download & split into chunks
+      const dlResponse = await base44.functions.invoke("downloadFeed", { feed_id: feed.id });
+      return dlResponse.data;
     },
     onSuccess: (data) => {
       setImportingFeedId(null);
       queryClient.invalidateQueries({ queryKey: ["xml-feeds"] });
-      queryClient.invalidateQueries({ queryKey: ["latest-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-chunks"] });
       const r = data?.results?.[0];
       if (r?.error) {
         toast.error(`Errore: ${r.error}`);
       } else {
-        toast.success(`Importati ${r?.imported ?? data?.total_imported ?? 0} annunci (${r?.skipped ?? 0} già presenti)`);
+        toast.success(`Feed scaricato: ${r?.total_jobs_found ?? 0} annunci trovati, ${r?.chunks_created ?? 0} chunk in elaborazione...`);
       }
     },
     onError: (error) => {
       setImportingFeedId(null);
-      toast.error("Errore durante l'importazione: " + error.message);
+      toast.error("Errore durante il download: " + error.message);
+    },
+  });
+
+  const processChunksMutation = useMutation({
+    mutationFn: async () => {
+      const response = await base44.functions.invoke("processChunks", {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["xml-feeds"] });
+      queryClient.invalidateQueries({ queryKey: ["pending-chunks"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-jobs"] });
+      toast.success(`Processati ${data?.processed ?? 0} chunk, importati ${data?.total_imported ?? 0} annunci. Rimanenti: ${data?.remaining_chunks ?? 0}`);
+    },
+    onError: (error) => {
+      toast.error("Errore elaborazione chunk: " + error.message);
     },
   });
 
