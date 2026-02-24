@@ -130,12 +130,28 @@ export default function DettaglioOfferta() {
             {/* Description */}
             {jobData.description && (
               <div className="mb-8">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <FileText className="w-5 h-5 text-emerald-600" />
                   Descrizione
                 </h2>
-                <div className="prose prose-sm prose-gray max-w-none">
-                  <p className="text-gray-600 leading-relaxed whitespace-pre-line">{jobData.description}</p>
+                <div className="space-y-3">
+                  {jobData.description.split(/\n\n+/).map((block, i) => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return null;
+                    // Bullet list: righe che iniziano con -, *, •
+                    const lines = trimmed.split('\n');
+                    const isBulletBlock = lines.length > 1 && lines.every(l => /^[-*•]\s/.test(l.trim()) || l.trim() === '');
+                    if (isBulletBlock) {
+                      return (
+                        <ul key={i} className="list-disc list-inside space-y-1 text-gray-600 pl-2">
+                          {lines.filter(l => l.trim()).map((l, j) => (
+                            <li key={j} className="leading-relaxed">{l.replace(/^[-*•]\s*/, '')}</li>
+                          ))}
+                        </ul>
+                      );
+                    }
+                    return <p key={i} className="text-gray-600 leading-relaxed whitespace-pre-line">{trimmed}</p>;
+                  })}
                 </div>
               </div>
             )}
@@ -143,16 +159,50 @@ export default function DettaglioOfferta() {
             {/* Requirements */}
             {jobData.requirements && (
               <div className="mb-8">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Requisiti</h2>
-                <p className="text-gray-600 leading-relaxed whitespace-pre-line">{jobData.requirements}</p>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Requisiti</h2>
+                <div className="space-y-3">
+                  {jobData.requirements.split(/\n\n+/).map((block, i) => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return null;
+                    const lines = trimmed.split('\n');
+                    const isBulletBlock = lines.length > 1 && lines.every(l => /^[-*•]\s/.test(l.trim()) || l.trim() === '');
+                    if (isBulletBlock) {
+                      return (
+                        <ul key={i} className="list-disc list-inside space-y-1 text-gray-600 pl-2">
+                          {lines.filter(l => l.trim()).map((l, j) => (
+                            <li key={j} className="leading-relaxed">{l.replace(/^[-*•]\s*/, '')}</li>
+                          ))}
+                        </ul>
+                      );
+                    }
+                    return <p key={i} className="text-gray-600 leading-relaxed whitespace-pre-line">{trimmed}</p>;
+                  })}
+                </div>
               </div>
             )}
 
             {/* Benefits */}
             {jobData.benefits && (
               <div className="mb-8">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Benefit</h2>
-                <p className="text-gray-600 leading-relaxed whitespace-pre-line">{jobData.benefits}</p>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Benefit</h2>
+                <div className="space-y-3">
+                  {jobData.benefits.split(/\n\n+/).map((block, i) => {
+                    const trimmed = block.trim();
+                    if (!trimmed) return null;
+                    const lines = trimmed.split('\n');
+                    const isBulletBlock = lines.length > 1 && lines.every(l => /^[-*•]\s/.test(l.trim()) || l.trim() === '');
+                    if (isBulletBlock) {
+                      return (
+                        <ul key={i} className="list-disc list-inside space-y-1 text-gray-600 pl-2">
+                          {lines.filter(l => l.trim()).map((l, j) => (
+                            <li key={j} className="leading-relaxed">{l.replace(/^[-*•]\s*/, '')}</li>
+                          ))}
+                        </ul>
+                      );
+                    }
+                    return <p key={i} className="text-gray-600 leading-relaxed whitespace-pre-line">{trimmed}</p>;
+                  })}
+                </div>
               </div>
             )}
 
