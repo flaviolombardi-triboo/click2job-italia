@@ -1,135 +1,119 @@
 /**
  * downloadFeed.js
  *
- * Scarica un feed XML(.gz) con fetch, decomprime in streaming tramite
- * DecompressionStream, fa parsing incrementale dei tag job (configurabile)
- * senza mai caricare l'intero contenuto in memoria.
- * Supporta field_mapping per trasformazioni custom dei campi.
+ * Scarica un feed XML(.gz), fa parsing streaming senza caricare tutto in memoria.
+ * Chunk size = 50 job. Usa bulkCreate per creare tutti i chunk in un colpo solo.
  */
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
 
-function extractField(jobXml, field) {
-  const re = new RegExp(`<${field}[^>]*>([\\s\\S]*?)<\\/${field}>`, 'i');
-  const m = jobXml.match(re);
-  if (!m) return undefined;
-  return m[1]
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/<[^>]+>/g, '')
-    .trim() || undefined;
-}
+// ─── Text cleaning ────────────────────────────────────────────────────────────
 
-/**
- * Pulisce il testo XML rimuovendo CDATA, tag HTML e spazi eccessivi.
- */
 function cleanXmlText(raw) {
+  if (!raw) return '';
   return raw
+    // Unwrap CDATA
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#\d+;/g, ' ')
-    .replace(/<br\s*\/?>/gi, ' ').replace(/<p[^>]*>/gi, ' ').replace(/<\/p>/gi, ' ')
+    // Named entities
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&apos;/gi, "'")
+    .replace(/&mdash;/gi, '—').replace(/&ndash;/gi, '–')
+    .replace(/&laquo;/gi, '«').replace(/&raquo;/gi, '»')
+    .replace(/&rsquo;/gi, "'").replace(/&lsquo;/gi, "'")
+    .replace(/&rdquo;/gi, '"').replace(/&ldquo;/gi, '"')
+    // Numeric entities (decimal & hex)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    // Common HTML block/inline tags → whitespace
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/?(p|li|div|ul|ol|h[1-6]|tr|td|th)[^>]*>/gi, ' ')
+    // Strip remaining tags
     .replace(/<[^>]+>/g, '')
+    // Collapse whitespace
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
-/**
- * Estrae un attributo da un tag di apertura XML.
- * es. <job id="123"> -> extractAttr(tag, 'id') => '123'
- */
-function extractAttr(openTag, attr) {
-  const re = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i');
-  const m = openTag.match(re);
-  return m ? m[1].trim() : undefined;
+// ─── XML attribute extraction ─────────────────────────────────────────────────
+
+function extractAttrs(openTag) {
+  const attrs = {};
+  const re = /([a-zA-Z_][a-zA-Z0-9_:-]*)=["']([^"']*)["']/g;
+  let m;
+  while ((m = re.exec(openTag)) !== null) {
+    const key = m[1].toLowerCase().replace(/[:-]/g, '_');
+    if (!attrs[key]) attrs[key] = m[2].trim();
+  }
+  return attrs;
 }
 
-/**
- * Estrae tutti i campi XML da un blocco job.
- * Gestisce: tag annidati, CDATA, attributi, namespace, HTML entities.
- */
+// ─── Job XML parser ───────────────────────────────────────────────────────────
+
+const ALIASES = {
+  jobtitle: 'title', job_title: 'title', positiontitle: 'title', position: 'title', name: 'title',
+  referencenumber: 'id', ref: 'id', jobid: 'id', job_id: 'id', vacancyid: 'id', reference: 'id', reqid: 'id', requisitionid: 'id',
+  companyname: 'company', employer: 'company', advertiser: 'company', client: 'company', organization: 'company',
+  city: 'location', town: 'location', place: 'location', municipality: 'location', worktown: 'location', worklocation: 'location',
+  jobtype: 'contract_type', contracttype: 'contract_type', job_type: 'contract_type', employment_type: 'contract_type', worktype: 'contract_type',
+  workhours: 'work_schedule', schedule: 'work_schedule', hours: 'work_schedule', workschedule: 'work_schedule',
+  jobcategory: 'category', job_category: 'category', sector: 'category', function: 'category', discipline: 'category', area: 'category',
+  jobdescription: 'description', job_description: 'description', body: 'description', detail: 'description', content: 'description', summary: 'description',
+  applyurl: 'apply_url', apply_link: 'apply_url', link: 'apply_url', url: 'apply_url', joburl: 'apply_url', applicationurl: 'apply_url', href: 'apply_url',
+  salary: 'salary_min', salarymin: 'salary_min', minsalary: 'salary_min',
+  salarymax: 'salary_max', maxsalary: 'salary_max',
+  requirements: 'requirements', qualifications: 'requirements', skills: 'requirements',
+  state: 'region', province: 'region',
+  expiry: 'expiry_date', deadline: 'expiry_date', expirydate: 'expiry_date', closingdate: 'expiry_date',
+};
+
+const LONG_FIELDS = new Set(['description', 'summary', 'body', 'detail', 'content', 'jobdescription', 'job_description', 'requirements', 'qualifications']);
+
 function parseJobXml(jobXml, openTagFull) {
   const job = {};
 
-  // Estrai attributi dal tag di apertura (es. id="123" ref="abc")
+  // Attributes on the opening tag (e.g. <job id="123">)
   if (openTagFull) {
-    const attrRe = /([a-zA-Z_][a-zA-Z0-9_:-]*)=["']([^"']+)["']/g;
-    let am;
-    while ((am = attrRe.exec(openTagFull)) !== null) {
-      const key = am[1].toLowerCase().replace(/:/g, '_');
-      if (!job[key]) job[key] = am[2].trim();
-    }
+    Object.assign(job, extractAttrs(openTagFull));
   }
 
-  // Parsing iterativo NON-ricorsivo: estrae tutti i tag di qualsiasi livello
-  // Priorità: tag di primo livello, poi annidati come fallback
-  const allTagRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)(?:[^>]*)>([\s\S]*?)<\/\1>/g;
+  // Match ALL tags recursively — greedy depth-first via simple regex pass
+  // We iterate with a while loop collecting ALL occurrences (including nested)
+  const tagRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)(?:\s[^>]*)?>([^<]*(?:(?!<\/\1>)<[^>]*>(?:[^<]|<(?!\/\1>))*)*[^<]*)<\/\1>/g;
+
+  // Simpler and faster: just extract every leaf tag value
+  const leafRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)(?:[^>]*)>([\s\S]*?)<\/\1>/g;
   let m;
-  while ((m = allTagRe.exec(jobXml)) !== null) {
+  while ((m = leafRe.exec(jobXml)) !== null) {
     const rawField = m[1];
-    const field = rawField.toLowerCase().replace(/:/g, '_');
-    const rawVal = m[2];
-
-    // Salta se il valore contiene altri tag (non è foglia) — verrà catturato nelle iterazioni interne
-    const isLeaf = !/<[a-zA-Z_]/.test(rawVal);
-
-    let val;
-    if (isLeaf) {
-      val = cleanXmlText(rawVal);
-    } else {
-      // Nodo con figli: prova a estrarre il testo diretto (ignorando sottotag)
-      val = cleanXmlText(rawVal.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ''));
-      if (!val) {
-        // Usa tutto il testo pulito dal nodo
-        val = cleanXmlText(rawVal);
-      }
-    }
+    const field = rawField.toLowerCase().replace(/[:-]/g, '_');
+    let val = cleanXmlText(m[2]);
 
     if (!val) continue;
 
-    // Truncate descrizioni lunghe
-    if (['description', 'summary', 'body', 'detail', 'content', 'jobdescription', 'job_description', 'responsabilities', 'duties'].includes(field) && val.length > 1500) {
-      val = val.substring(0, 1500);
-    }
+    // Truncate long text fields
+    if (LONG_FIELDS.has(field)) val = val.substring(0, 2000);
 
-    // Non sovrascrivere un valore già trovato (primo match wins)
+    // First-value wins
     if (!job[field]) job[field] = val;
 
-    // Alias comuni: normalizza verso nomi standard
-    const aliases = {
-      jobtitle: 'title', job_title: 'title', positiontitle: 'title', position: 'title',
-      referencenumber: 'id', ref: 'id', jobid: 'id', job_id: 'id', vacancyid: 'id',
-      companyname: 'company', employer: 'company', advertiser: 'company', client: 'company',
-      city: 'location', town: 'location', place: 'location', municipality: 'location',
-      jobtype: 'contract_type', contracttype: 'contract_type', job_type: 'contract_type', employment_type: 'contract_type',
-      workhours: 'work_schedule', schedule: 'work_schedule', hours: 'work_schedule',
-      jobcategory: 'category', job_category: 'category', sector: 'category', function: 'category',
-      jobdescription: 'description', job_description: 'description',
-      applyurl: 'apply_url', apply_link: 'apply_url', link: 'apply_url', url: 'apply_url', joburl: 'apply_url',
-      salary: 'salary_min', salarymin: 'salary_min', salarymax: 'salary_max',
-      requirements: 'requirements', qualifications: 'requirements',
-    };
-    if (aliases[field] && !job[aliases[field]]) {
-      job[aliases[field]] = job[field];
-    }
+    // Populate aliases
+    const alias = ALIASES[field];
+    if (alias && !job[alias]) job[alias] = job[field];
   }
 
-  // Considera il record valido se ha titolo oppure un ID riconoscibile
-  return (job.title || job.id || job.referencenumber || job.jobid || job.vacancyid) ? job : null;
+  return (job.title || job.id || job.vacancyid || job.jobid) ? job : null;
 }
 
-/**
- * Legge lo stream decomprimendo se gz.
- * Usa il jobTag configurabile per trovare i blocchi (default: "job").
- */
+// ─── Streaming parser ─────────────────────────────────────────────────────────
+
 async function* streamParseJobs(readableStream, isGzip, jobTag = 'job') {
   let source = readableStream;
-  if (isGzip) {
-    source = readableStream.pipeThrough(new DecompressionStream('gzip'));
-  }
+  if (isGzip) source = readableStream.pipeThrough(new DecompressionStream('gzip'));
 
   const reader = source.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const MAX_BUF = 500 * 1024;
+  const MAX_BUF = 1024 * 1024; // 1 MB safety cap
   const openTag = `<${jobTag}`;
   const closeTag = `</${jobTag}>`;
 
@@ -138,41 +122,36 @@ async function* streamParseJobs(readableStream, isGzip, jobTag = 'job') {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-
-      while (true) {
-        const start = buffer.indexOf(openTag);
-        const end = buffer.indexOf(closeTag);
-        if (start === -1 || end === -1 || end < start) break;
-
-        const closeOfOpenTag = buffer.indexOf('>', start);
-        const jobXml = buffer.slice(closeOfOpenTag + 1, end);
-        buffer = buffer.slice(end + closeTag.length);
-
-        const job = parseJobXml(jobXml);
-        if (job) yield job;
-      }
-
-      if (buffer.length > MAX_BUF) {
-        buffer = buffer.slice(-50 * 1024);
-      }
+      yield* drainBuffer();
+      // Prevent unbounded buffer growth
+      if (buffer.length > MAX_BUF) buffer = buffer.slice(-100 * 1024);
     }
-    // Process any remaining buffer
-    while (true) {
-      const start = buffer.indexOf(openTag);
-      const end = buffer.indexOf(closeTag);
-      if (start === -1 || end === -1 || end < start) break;
-      const closeOfOpenTag = buffer.indexOf('>', start);
-      const jobXml = buffer.slice(closeOfOpenTag + 1, end);
-      buffer = buffer.slice(end + closeTag.length);
-      const job = parseJobXml(jobXml);
-      if (job) yield job;
-    }
+    // Drain remainder
+    yield* drainBuffer();
   } catch (_) {
-    // Stream ended — ok
+    // Stream ended
   } finally {
     reader.releaseLock();
   }
+
+  function* drainBuffer() {
+    while (true) {
+      const start = buffer.indexOf(openTag);
+      if (start === -1) break;
+      const end = buffer.indexOf(closeTag, start);
+      if (end === -1) break;
+      const openTagEnd = buffer.indexOf('>', start);
+      if (openTagEnd === -1 || openTagEnd > end) break;
+      const openTagFull = buffer.slice(start + 1, openTagEnd); // e.g. "job id='1' ..."
+      const jobXml = buffer.slice(openTagEnd + 1, end);
+      buffer = buffer.slice(end + closeTag.length);
+      const job = parseJobXml(jobXml, openTagFull);
+      if (job) yield job;
+    }
+  }
 }
+
+// ─── HTTP handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   try {
@@ -182,59 +161,47 @@ Deno.serve(async (req) => {
 
     try {
       const user = await base44.auth.me();
-      if (user?.role !== 'admin') {
-        return Response.json({ error: 'Forbidden' }, { status: 403 });
-      }
+      if (user?.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
     } catch (_) { /* scheduler */ }
 
     const client = base44.asServiceRole;
-
     const feeds = await client.entities.XMLFeed.filter({ status: 'active' });
-    if (!feeds || feeds.length === 0) {
-      return Response.json({ message: 'No active feeds', feeds_processed: 0 });
-    }
+    if (!feeds || feeds.length === 0) return Response.json({ message: 'No active feeds', feeds_processed: 0 });
 
-    const feedsToProcess = targetFeedId
-      ? feeds.filter((f) => f.id === targetFeedId)
-      : feeds;
-
+    const feedsToProcess = targetFeedId ? feeds.filter((f) => f.id === targetFeedId) : feeds;
     const results = [];
 
     for (const feed of feedsToProcess) {
       try {
-        // Delete old pending chunks for this feed
+        // Delete old pending chunks for this feed (parallel fire-and-forget)
         const oldChunks = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' });
-        for (const c of oldChunks) {
-          await client.entities.FeedChunk.delete(c.id);
+        if (oldChunks.length > 0) {
+          await Promise.all(oldChunks.map((c) => client.entities.FeedChunk.delete(c.id)));
         }
 
         const fetchRes = await fetch(feed.url, {
-          headers: { 'User-Agent': 'Click2Job-Bot/1.0' },
-          signal: AbortSignal.timeout(60000),
+          headers: { 'User-Agent': 'Click2Job-Bot/1.0', 'Accept-Encoding': 'gzip, deflate' },
+          signal: AbortSignal.timeout(90000),
         });
-        if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
+        if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
 
-        const isGzip =
-          (fetchRes.headers.get('content-type') || '').includes('gzip') ||
-          feed.url.endsWith('.gz') ||
-          fetchRes.headers.get('content-encoding') === 'gzip';
+        const contentType = fetchRes.headers.get('content-type') || '';
+        const contentEncoding = fetchRes.headers.get('content-encoding') || '';
+        const isGzip = contentType.includes('gzip') || feed.url.endsWith('.gz') || contentEncoding === 'gzip';
+        const jobTag = (feed.job_tag || 'job').trim();
 
-        const jobTag = feed.job_tag || 'job';
-
-        const CHUNK_SIZE = 10;
-        const MAX_JOBS = 2000;
-        const MAX_CHUNKS_PER_RUN = 20;
+        const CHUNK_SIZE = 50;      // 50 job per chunk → meno API calls
+        const MAX_JOBS = 5000;      // fino a 5000 job per feed per run
         let currentChunk = [];
         let chunkIndex = 0;
         let totalJobs = 0;
-        let chunksCreated = 0;
+        const chunksToCreate = []; // accumula tutto, poi bulkCreate
 
         for await (const job of streamParseJobs(fetchRes.body, isGzip, jobTag)) {
           currentChunk.push(job);
           totalJobs++;
-
           if (currentChunk.length >= CHUNK_SIZE) {
-            await client.entities.FeedChunk.create({
+            chunksToCreate.push({
               feed_id: feed.id,
               feed_name: feed.name,
               chunk_index: chunkIndex++,
@@ -242,16 +209,12 @@ Deno.serve(async (req) => {
               status: 'pending',
               jobs_imported: 0,
             });
-            chunksCreated++;
             currentChunk = [];
-            if (chunksCreated % 5 === 0) await new Promise(r => setTimeout(r, 2000));
           }
-
-          if (totalJobs >= MAX_JOBS || chunksCreated >= MAX_CHUNKS_PER_RUN) break;
+          if (totalJobs >= MAX_JOBS) break;
         }
-
         if (currentChunk.length > 0) {
-          await client.entities.FeedChunk.create({
+          chunksToCreate.push({
             feed_id: feed.id,
             feed_name: feed.name,
             chunk_index: chunkIndex,
@@ -259,22 +222,19 @@ Deno.serve(async (req) => {
             status: 'pending',
             jobs_imported: 0,
           });
-          chunksCreated++;
         }
 
         if (totalJobs === 0) {
           await client.entities.XMLFeed.update(feed.id, { status: 'error' });
-          results.push({ feed: feed.name, error: 'Nessun job trovato nel feed' });
+          results.push({ feed: feed.name, error: 'Nessun job trovato nel feed — verifica il job_tag configurato' });
           continue;
         }
 
+        // Crea tutti i chunk in una sola chiamata bulk
+        await client.entities.FeedChunk.bulkCreate(chunksToCreate);
         await client.entities.XMLFeed.update(feed.id, { status: 'active' });
 
-        results.push({
-          feed: feed.name,
-          total_jobs_found: totalJobs,
-          chunks_created: chunksCreated,
-        });
+        results.push({ feed: feed.name, total_jobs_found: totalJobs, chunks_created: chunksToCreate.length });
       } catch (err) {
         await client.entities.XMLFeed.update(feed.id, { status: 'error' }).catch(() => {});
         results.push({ feed: feed.name, error: err.message });
