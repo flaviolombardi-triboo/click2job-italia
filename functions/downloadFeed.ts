@@ -27,8 +27,11 @@ const JOB_FIELDS = [
 function parseJobXml(jobXml) {
   const job = {};
   for (const field of JOB_FIELDS) {
-    const v = extractField(jobXml, field);
-    if (v) job[field] = v;
+    let v = extractField(jobXml, field);
+    if (!v) continue;
+    // Truncate description to 800 chars to keep chunk size small
+    if (field === 'description' && v.length > 800) v = v.substring(0, 800);
+    job[field] = v;
   }
   return (job.title || job.id) ? job : null;
 }
