@@ -90,8 +90,8 @@ function parseJobXml(jobXml, openTagFull) {
 
     if (!val) continue;
 
-    // Truncate long text fields
-    if (LONG_FIELDS.has(field)) val = val.substring(0, 2000);
+    // Truncate only extremely long fields (non description)
+    if (LONG_FIELDS.has(field) && field !== 'description' && val.length > 4000) val = val.substring(0, 4000);
 
     // First-value wins
     if (!job[field]) job[field] = val;
