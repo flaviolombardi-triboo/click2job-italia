@@ -50,59 +50,19 @@ export default function GestisciFeed() {
   const importFeedMutation = useMutation({
     mutationFn: async (feed) => {
       setImportingFeedId(feed.id);
-      // Fetch the XML feed content
-      const response = await fetch(feed.url);
-      const xmlText = await response.text();
-      
-      // Use LLM to parse XML into job offers
-      const result = await base44.integrations.Core.InvokeLLM({
-        prompt: `Analizza questo feed XML di offerte di lavoro e estrai tutti gli annunci. Per ogni annuncio estrai: title, company, location, category, description, requirements, apply_url, contract_type (uno tra: tempo_indeterminato, tempo_determinato, apprendistato, stage, partita_iva, collaborazione, somministrazione), salary_min (numero), salary_max (numero). Se un campo non è disponibile, omettilo. Ecco il feed XML:\n\n${xmlText.substring(0, 15000)}`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            jobs: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  title: { type: "string" },
-                  company: { type: "string" },
-                  location: { type: "string" },
-                  category: { type: "string" },
-                  description: { type: "string" },
-                  requirements: { type: "string" },
-                  apply_url: { type: "string" },
-                  contract_type: { type: "string" },
-                  salary_min: { type: "number" },
-                  salary_max: { type: "number" },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (result.jobs && result.jobs.length > 0) {
-        const jobsToCreate = result.jobs.map((j) => ({
-          ...j,
-          source: feed.name,
-          is_active: true,
-          external_id: feed.id + "_" + (j.title || "").substring(0, 20),
-        }));
-        await base44.entities.JobOffer.bulkCreate(jobsToCreate);
-        await base44.entities.XMLFeed.update(feed.id, {
-          last_import_date: new Date().toISOString(),
-          total_jobs_imported: (feed.total_jobs_imported || 0) + jobsToCreate.length,
-        });
-        return jobsToCreate.length;
-      }
-      return 0;
+      const response = await base44.functions.invoke("importFeeds", { feed_id: feed.id });
+      return response.data;
     },
-    onSuccess: (count) => {
+    onSuccess: (data) => {
       setImportingFeedId(null);
       queryClient.invalidateQueries({ queryKey: ["xml-feeds"] });
       queryClient.invalidateQueries({ queryKey: ["latest-jobs"] });
-      toast.success(`Importati ${count} annunci con successo`);
+      const r = data?.results?.[0];
+      if (r?.error) {
+        toast.error(`Errore: ${r.error}`);
+      } else {
+        toast.success(`Importati ${r?.imported ?? data?.total_imported ?? 0} annunci (${r?.skipped ?? 0} già presenti)`);
+      }
     },
     onError: (error) => {
       setImportingFeedId(null);
