@@ -70,7 +70,7 @@ export default function Layout({ children, currentPageName }) {
                   style={{ borderColor: C2J_GREEN, color: C2J_GREEN }}
                 >
                   <Building2 className="w-4 h-4 mr-2" />
-                  Area Aziende
+                  Posta un'offerta
                 </Button>
               </Link>
             </div>
