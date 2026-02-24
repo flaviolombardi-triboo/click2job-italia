@@ -321,19 +321,7 @@ export default function GestisciFeed() {
         </div>
       )}
 
-      {/* Info box */}
-      <div className="mt-10 bg-blue-50 rounded-2xl p-6 border border-blue-100">
-        <h3 className="font-semibold text-blue-900 flex items-center gap-2">
-          <FileText className="w-5 h-5" />
-          Come funziona
-        </h3>
-        <ul className="mt-3 space-y-2 text-sm text-blue-800">
-          <li>1. Aggiungi l'URL del feed XML del tuo cliente</li>
-          <li>2. Clicca "Importa" per analizzare il feed e creare automaticamente gli annunci</li>
-          <li>3. Le offerte verranno pubblicate e saranno subito visibili ai candidati</li>
-          <li>4. Puoi re-importare in qualsiasi momento per aggiornare gli annunci</li>
-        </ul>
-      </div>
+
     </div>
   );
 }
