@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
           fetchRes.headers.get('content-encoding') === 'gzip';
 
         // Stream-parse jobs without loading full file into memory
-        const CHUNK_SIZE = 25;
+        const CHUNK_SIZE = 10; // smaller chunks to stay under field size limit
         const MAX_JOBS = 5000; // safety cap per run
         let currentChunk = [];
         let chunkIndex = 0;
