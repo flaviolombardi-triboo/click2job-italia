@@ -19,28 +19,101 @@ function extractField(jobXml, field) {
 }
 
 /**
- * Estrae tutti i campi XML da un blocco job.
- * Raccoglie qualsiasi tag trovato, non solo quelli predefiniti.
+ * Pulisce il testo XML rimuovendo CDATA, tag HTML e spazi eccessivi.
  */
-function parseJobXml(jobXml) {
+function cleanXmlText(raw) {
+  return raw
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#\d+;/g, ' ')
+    .replace(/<br\s*\/?>/gi, ' ').replace(/<p[^>]*>/gi, ' ').replace(/<\/p>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Estrae un attributo da un tag di apertura XML.
+ * es. <job id="123"> -> extractAttr(tag, 'id') => '123'
+ */
+function extractAttr(openTag, attr) {
+  const re = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i');
+  const m = openTag.match(re);
+  return m ? m[1].trim() : undefined;
+}
+
+/**
+ * Estrae tutti i campi XML da un blocco job.
+ * Gestisce: tag annidati, CDATA, attributi, namespace, HTML entities.
+ */
+function parseJobXml(jobXml, openTagFull) {
   const job = {};
-  // Trova tutti i tag di primo livello nel blocco
-  const tagRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)[^>]*>([\s\S]*?)<\/\1>/g;
-  let m;
-  while ((m = tagRe.exec(jobXml)) !== null) {
-    const field = m[1].toLowerCase();
-    let val = m[2]
-      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-      .replace(/<[^>]+>/g, '')
-      .trim();
-    if (!val) continue;
-    // Truncate description-like fields
-    if (['description', 'summary', 'body', 'detail', 'content'].includes(field) && val.length > 800) {
-      val = val.substring(0, 800);
+
+  // Estrai attributi dal tag di apertura (es. id="123" ref="abc")
+  if (openTagFull) {
+    const attrRe = /([a-zA-Z_][a-zA-Z0-9_:-]*)=["']([^"']+)["']/g;
+    let am;
+    while ((am = attrRe.exec(openTagFull)) !== null) {
+      const key = am[1].toLowerCase().replace(/:/g, '_');
+      if (!job[key]) job[key] = am[2].trim();
     }
-    job[field] = val;
   }
-  return (job.title || job.id || job.referencenumber) ? job : null;
+
+  // Parsing iterativo NON-ricorsivo: estrae tutti i tag di qualsiasi livello
+  // Priorità: tag di primo livello, poi annidati come fallback
+  const allTagRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)(?:[^>]*)>([\s\S]*?)<\/\1>/g;
+  let m;
+  while ((m = allTagRe.exec(jobXml)) !== null) {
+    const rawField = m[1];
+    const field = rawField.toLowerCase().replace(/:/g, '_');
+    const rawVal = m[2];
+
+    // Salta se il valore contiene altri tag (non è foglia) — verrà catturato nelle iterazioni interne
+    const isLeaf = !/<[a-zA-Z_]/.test(rawVal);
+
+    let val;
+    if (isLeaf) {
+      val = cleanXmlText(rawVal);
+    } else {
+      // Nodo con figli: prova a estrarre il testo diretto (ignorando sottotag)
+      val = cleanXmlText(rawVal.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ''));
+      if (!val) {
+        // Usa tutto il testo pulito dal nodo
+        val = cleanXmlText(rawVal);
+      }
+    }
+
+    if (!val) continue;
+
+    // Truncate descrizioni lunghe
+    if (['description', 'summary', 'body', 'detail', 'content', 'jobdescription', 'job_description', 'responsabilities', 'duties'].includes(field) && val.length > 1500) {
+      val = val.substring(0, 1500);
+    }
+
+    // Non sovrascrivere un valore già trovato (primo match wins)
+    if (!job[field]) job[field] = val;
+
+    // Alias comuni: normalizza verso nomi standard
+    const aliases = {
+      jobtitle: 'title', job_title: 'title', positiontitle: 'title', position: 'title',
+      referencenumber: 'id', ref: 'id', jobid: 'id', job_id: 'id', vacancyid: 'id',
+      companyname: 'company', employer: 'company', advertiser: 'company', client: 'company',
+      city: 'location', town: 'location', place: 'location', municipality: 'location',
+      jobtype: 'contract_type', contracttype: 'contract_type', job_type: 'contract_type', employment_type: 'contract_type',
+      workhours: 'work_schedule', schedule: 'work_schedule', hours: 'work_schedule',
+      jobcategory: 'category', job_category: 'category', sector: 'category', function: 'category',
+      jobdescription: 'description', job_description: 'description',
+      applyurl: 'apply_url', apply_link: 'apply_url', link: 'apply_url', url: 'apply_url', joburl: 'apply_url',
+      salary: 'salary_min', salarymin: 'salary_min', salarymax: 'salary_max',
+      requirements: 'requirements', qualifications: 'requirements',
+    };
+    if (aliases[field] && !job[aliases[field]]) {
+      job[aliases[field]] = job[field];
+    }
+  }
+
+  // Considera il record valido se ha titolo oppure un ID riconoscibile
+  return (job.title || job.id || job.referencenumber || job.jobid || job.vacancyid) ? job : null;
 }
 
 /**
