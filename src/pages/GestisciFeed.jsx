@@ -19,26 +19,10 @@ import { toast } from "sonner";
 
 export default function GestisciFeed() {
   const [showAddForm, setShowAddForm] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  useEffect(() => {
-    base44.auth.me().then((u) => { setUser(u); setAuthLoading(false); }).catch(() => setAuthLoading(false));
-  }, []);
-
-  if (authLoading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
-
-  if (!user || user.role !== "admin") {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-4">
-        <Lock className="w-10 h-10 text-gray-300" />
-        <h2 className="text-lg font-semibold text-gray-700">Area riservata</h2>
-        <p className="text-gray-500 text-sm">Questa sezione è accessibile solo agli amministratori del sito.</p>
-      </div>
-    );
-  }
   const [newFeed, setNewFeed] = useState({ name: "", url: "", notes: "" });
   const [importingFeedId, setImportingFeedId] = useState(null);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const queryClient = useQueryClient();
 
   const { data: feeds, isLoading } = useQuery({
