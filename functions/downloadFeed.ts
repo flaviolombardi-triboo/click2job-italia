@@ -134,7 +134,8 @@ Deno.serve(async (req) => {
 
         // Stream-parse jobs without loading full file into memory
         const CHUNK_SIZE = 10; // smaller chunks to stay under field size limit
-        const MAX_JOBS = 5000; // safety cap per run
+        const MAX_JOBS = 2000; // safety cap per run
+        const MAX_CHUNKS_PER_RUN = 50; // avoid rate-limit
         let currentChunk = [];
         let chunkIndex = 0;
         let totalJobs = 0;
