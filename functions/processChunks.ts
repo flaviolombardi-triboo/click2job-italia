@@ -82,30 +82,112 @@ function applyFieldMapping(rawJob, rules) {
   return mapped;
 }
 
+// ─── Text normalisation helpers ───────────────────────────────────────────────
+
+/** Titolo: Title Case, rimuove codici interni tipo [REF-123], massimo 120 char */
+function cleanTitle(raw) {
+  if (!raw) return undefined;
+  let t = raw
+    .replace(/\[.*?\]/g, '')        // [REF-123]
+    .replace(/\(.*?\)/g, '')        // (codice interno)
+    .replace(/[-_]{2,}/g, ' ')      // -- o ___
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  // Title Case se tutto maiuscolo
+  if (t === t.toUpperCase() && t.length > 3) {
+    t = t.toLowerCase().replace(/(?:^|\s|-)\S/g, c => c.toUpperCase());
+  }
+  return t.substring(0, 120) || undefined;
+}
+
+/** Azienda: rimuove suffissi legali ridondanti, normalizza spazi */
+function cleanCompany(raw) {
+  if (!raw) return undefined;
+  let c = raw
+    .replace(/\b(S\.?R\.?L\.?|S\.?P\.?A\.?|S\.?N\.?C\.?|S\.?A\.?S\.?)\b/gi, m => m.replace(/\./g, '').toUpperCase())
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  // Rimuovi aziende placeholder/anonime
+  if (/^(confidential|azienda riservata|riservato|cliente riservato|n\/d|nd|-)$/i.test(c)) return undefined;
+  // Title Case se tutto maiuscolo
+  if (c === c.toUpperCase() && c.length > 4 && !/\bSRL\b|\bSPA\b|\bSNC\b/.test(c)) {
+    c = c.toLowerCase().replace(/(?:^|\s)\S/g, x => x.toUpperCase());
+  }
+  return c.substring(0, 120) || undefined;
+}
+
+/** Location: normalizza capitalizzazione, rimuove province tra parentesi tipo "Milano (MI)" → "Milano" */
+function cleanLocation(raw) {
+  if (!raw) return undefined;
+  let l = raw
+    .replace(/\s*\([A-Z]{2}\)\s*/g, '')   // (MI), (RM) ecc.
+    .replace(/\s*-\s*[A-Z]{2}$/g, '')     // Milano - MI
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (l === l.toUpperCase() && l.length > 2) {
+    l = l.toLowerCase().replace(/(?:^|\s|-)\S/g, c => c.toUpperCase());
+  }
+  return l.substring(0, 100) || undefined;
+}
+
+/** Descrizione: rimuove duplicazioni di spazi/newline, tronca */
+function cleanDescription(raw) {
+  if (!raw) return undefined;
+  return raw
+    .replace(/(\n\s*){3,}/g, '\n\n')   // max 2 righe vuote consecutive
+    .replace(/\s{3,}/g, '  ')
+    .trim()
+    .substring(0, 2000) || undefined;
+}
+
+/** Salary: estrae il primo numero da stringhe tipo "30.000 €" o "30000-40000" */
+function parseSalary(raw) {
+  if (!raw) return undefined;
+  const cleaned = String(raw).replace(/[^\d.,\-]/g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? undefined : Math.round(n);
+}
+
+// ─── Record builder ───────────────────────────────────────────────────────────
+
 function buildJobRecord(rawJob, mappingRules, feedName, feedId) {
   const j = applyFieldMapping(rawJob, mappingRules);
 
-  const extRaw = j.id || j.referencenumber || j.jobid || j.vacancyid || j.reqid || j.requisitionid;
-  const extId = extRaw ? `${feedId}_${extRaw}` : null;
+  const extRaw = j.id || j.referencenumber || j.jobid || j.vacancyid || j.reqid || j.requisitionid || j.reference;
+  const extId = extRaw ? `${feedId}_${String(extRaw).trim()}` : null;
 
-  const applyUrl = j.apply_url || j.url || j.link || j.joburl || j.applicationurl || undefined;
-  const location = j.location || j.city || j.town || j.place || j.municipality || j.worklocation || undefined;
+  const rawTitle = j.title || j.jobtitle || j.position || j.job_title || j.positiontitle;
+  const rawCompany = j.company || j.employer || j.company_name || j.advertiser || j.organization || j.client || j.azienda;
+  const rawLocation = j.location || j.city || j.town || j.place || j.municipality || j.worklocation || j.worktown || j.sede;
+  const rawApplyUrl = j.apply_url || j.applicationurl || j.applyurl || j.apply_link || j.joburl || j.url || j.link;
+
+  const title = cleanTitle(rawTitle);
+  if (!title) return null;
+
+  const company = cleanCompany(rawCompany);
+  const location = cleanLocation(rawLocation);
 
   const record = {
-    title: j.title || j.jobtitle || j.position || j.job_title,
-    company: j.company || j.employer || j.company_name || j.advertiser || j.organization,
+    title,
+    company,
     location,
     region: j.region || j.state || j.province || mapRegion(location),
     category: j.category || j.jobcategory || j.sector || j.function || j.discipline || j.area,
-    description: j.description ? j.description.substring(0, 2000) : undefined,
-    requirements: (j.requirements || j.qualifications || j.skills) ? (j.requirements || j.qualifications || j.skills || '').substring(0, 1000) : undefined,
-    apply_url: applyUrl,
+    description: cleanDescription(j.description),
+    requirements: (j.requirements || j.qualifications || j.skills)
+      ? (j.requirements || j.qualifications || j.skills || '').substring(0, 1000)
+      : undefined,
+    apply_url: rawApplyUrl,
     external_id: extId || undefined,
     source: feedName,
-    contract_type: mapContractType(j.contract_type || j.type || j.jobtype || j.job_type || j.contracttype || j.employment_type || j.worktype),
-    work_schedule: mapWorkSchedule(j.work_schedule || j.hours || j.workschedule || j.schedule || j.workhours),
-    salary_min: j.salary_min ? parseInt(j.salary_min) : undefined,
-    salary_max: j.salary_max ? parseInt(j.salary_max) : undefined,
+    contract_type: mapContractType(
+      j.contract_type || j.type || j.jobtype || j.job_type || j.contracttype || j.employment_type || j.worktype
+    ),
+    work_schedule: mapWorkSchedule(
+      j.work_schedule || j.hours || j.workschedule || j.schedule || j.workhours
+    ),
+    salary_min: parseSalary(j.salary_min || j.salary),
+    salary_max: parseSalary(j.salary_max),
     is_active: true,
     is_featured: false,
   };
@@ -115,7 +197,7 @@ function buildJobRecord(rawJob, mappingRules, feedName, feedId) {
     if (record[k] === undefined || record[k] === null || record[k] === '') delete record[k];
   }
 
-  return record.title ? { record, extId } : null;
+  return { record, extId };
 }
 
 // ─── Process one feed's worth of chunks ──────────────────────────────────────
