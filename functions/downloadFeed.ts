@@ -106,32 +106,43 @@ Deno.serve(async (req) => {
         let xmlText = '';
 
         if (isGzip) {
-          // Download the ENTIRE compressed file first (gzip checksum is at the end)
+          // Download full compressed buffer
           const rawBuffer = await fetchRes.arrayBuffer();
           const rawBytes = new Uint8Array(rawBuffer);
 
-          // Decompress fully
+          // Decompress: pipe compressed bytes through DecompressionStream
+          // We read from the readable side while writing on the writable side concurrently
           const ds = new DecompressionStream('gzip');
-          const writer = ds.writable.getWriter();
           const reader = ds.readable.getReader();
+          const writer = ds.writable.getWriter();
 
-          // Write all compressed data then close
-          writer.write(rawBytes).catch(() => {});
-          writer.close().catch(() => {});
-
-          // Read all decompressed output, stop at MAX_DECOMP_BYTES
           const decompChunks = [];
           let decompTotal = 0;
-          try {
-            while (decompTotal < MAX_DECOMP_BYTES) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              decompChunks.push(value);
-              decompTotal += value.length;
+
+          // Start reading decompressed output concurrently
+          const readPromise = (async () => {
+            try {
+              while (decompTotal < MAX_DECOMP_BYTES) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                decompChunks.push(value);
+                decompTotal += value.length;
+              }
+            } catch (_) {
+              // ignore checksum/truncation errors — we have the data already
             }
+          })();
+
+          // Write all compressed data then close writer
+          try {
+            await writer.write(rawBytes);
+            await writer.close();
           } catch (_) {
-            // ignore checksum error if we already have enough data
+            // ignore close errors
           }
+
+          // Wait for reader to finish
+          await readPromise;
 
           const merged = new Uint8Array(decompTotal);
           let off = 0;
