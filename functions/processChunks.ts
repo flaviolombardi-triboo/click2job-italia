@@ -3,6 +3,7 @@
  *
  * Prende i FeedChunk con status="pending" (max 5 per run),
  * applica il field_mapping del feed, crea i JobOffer corrispondenti.
+ * Registra ogni sessione di elaborazione su ImportLog.
  */
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
 
@@ -58,80 +59,37 @@ function mapRegion(location) {
   return undefined;
 }
 
-/**
- * Applica le regole di field_mapping al job grezzo.
- * 
- * Formato regole (array di oggetti):
- * [
- *   { "target": "title", "source": "jobtitle" },
- *   { "target": "company", "source": ["company", "employer"], "join": " - " },
- *   { "target": "location", "source": "city", "replace": [{ "from": "MI", "to": "Milano" }] },
- *   { "target": "contract_type", "source": "type", "static": "tempo_indeterminato" },
- *   { "target": "description", "source": ["summary", "body"], "join": "\n\n" }
- * ]
- * 
- * Tipi di operazioni supportate:
- * - source: stringa o array di campi sorgente
- * - join: separatore per unire più campi (default " ")
- * - replace: array di {from, to} per sostituzioni
- * - static: valore fisso da assegnare sempre
- * - prefix: prefisso da aggiungere al valore
- * - suffix: suffisso da aggiungere al valore
- * - truncate: numero massimo di caratteri
- */
 function applyFieldMapping(rawJob, rules) {
   if (!rules || !Array.isArray(rules) || rules.length === 0) return rawJob;
-
   const mapped = { ...rawJob };
-
   for (const rule of rules) {
     if (!rule.target) continue;
-
-    // Static value
-    if (rule.static !== undefined) {
-      mapped[rule.target] = rule.static;
-      continue;
-    }
-
-    // Source field(s)
+    if (rule.static !== undefined) { mapped[rule.target] = rule.static; continue; }
     const sources = Array.isArray(rule.source) ? rule.source : [rule.source];
     const values = sources.map(s => rawJob[s] || rawJob[s?.toLowerCase()]).filter(Boolean);
-
     if (values.length === 0) continue;
-
     let val = values.join(rule.join !== undefined ? rule.join : ' ');
-
-    // Replace operations
     if (rule.replace && Array.isArray(rule.replace)) {
       for (const rep of rule.replace) {
-        if (rep.from && rep.to !== undefined) {
-          val = val.split(rep.from).join(rep.to);
-        }
+        if (rep.from && rep.to !== undefined) val = val.split(rep.from).join(rep.to);
       }
     }
-
-    // Prefix / suffix
     if (rule.prefix) val = rule.prefix + val;
     if (rule.suffix) val = val + rule.suffix;
-
-    // Truncate
     if (rule.truncate && val.length > rule.truncate) val = val.substring(0, rule.truncate);
-
     mapped[rule.target] = val;
   }
-
   return mapped;
 }
 
 Deno.serve(async (req) => {
+  const startTime = Date.now();
   try {
     const base44 = createClientFromRequest(req);
 
     try {
       const user = await base44.auth.me();
-      if (user?.role !== 'admin') {
-        return Response.json({ error: 'Forbidden' }, { status: 403 });
-      }
+      if (user?.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
     } catch (_) { /* scheduler */ }
 
     const client = base44.asServiceRole;
@@ -143,11 +101,12 @@ Deno.serve(async (req) => {
       return Response.json({ message: 'No pending chunks', processed: 0 });
     }
 
-    // Cache feed configs to avoid redundant fetches
     const feedCache = {};
-
     let totalImported = 0;
+    let totalSkipped = 0;
     const results = [];
+    // Track per-feed aggregates for ImportLog
+    const feedAggregates = {};
 
     for (const chunk of toProcess) {
       await client.entities.FeedChunk.update(chunk.id, { status: 'processing' });
@@ -157,6 +116,10 @@ Deno.serve(async (req) => {
         const feedName = chunk.feed_name;
         const feedId = chunk.feed_id;
 
+        if (!feedAggregates[feedId]) {
+          feedAggregates[feedId] = { feedName, imported: 0, skipped: 0, chunks: 0, hasError: false };
+        }
+
         // Load feed config (with caching)
         let mappingRules = [];
         if (!feedCache[feedId]) {
@@ -165,40 +128,40 @@ Deno.serve(async (req) => {
         }
         const feedConfig = feedCache[feedId];
         if (feedConfig?.field_mapping) {
-          try {
-            mappingRules = JSON.parse(feedConfig.field_mapping);
-          } catch (_) { /* invalid JSON — ignore */ }
+          try { mappingRules = JSON.parse(feedConfig.field_mapping); } catch (_) {}
         }
 
-        // Deduplication
+        // Deduplication: fetch only external_ids for this feed (more efficient)
         const existingJobs = await client.entities.JobOffer.filter({ source: feedName });
         const existingIds = new Set(existingJobs.map((j) => j.external_id).filter(Boolean));
 
         const jobsToCreate = [];
 
         for (const rawJob of jobs) {
-          // Apply custom field mapping rules first
           const j = applyFieldMapping(rawJob, mappingRules);
+          const extId = (j.id || j.referencenumber || j.jobid || j.vacancyid)
+            ? `${feedId}_${j.id || j.referencenumber || j.jobid || j.vacancyid}`
+            : null;
 
-          const extId = (j.id || j.referencenumber) ? `${feedId}_${j.id || j.referencenumber}` : null;
-          if (extId && existingIds.has(extId)) continue;
+          if (extId && existingIds.has(extId)) { totalSkipped++; feedAggregates[feedId].skipped++; continue; }
 
-          const applyUrl = j.url || j.apply_url || j.link || j.joburl || undefined;
-          const location = j.location || j.city || j.state || j.town || j.place || undefined;
+          const applyUrl = j.apply_url || j.url || j.link || j.joburl || undefined;
+          const location = j.location || j.city || j.town || j.place || j.municipality || undefined;
 
           const mapped = {
             title: j.title || j.jobtitle || j.position || j.job_title,
             company: j.company || j.employer || j.company_name || j.advertiser,
             location,
             region: j.region || mapRegion(location),
-            category: j.category || j.jobcategory || j.sector,
+            category: j.category || j.jobcategory || j.sector || j.function,
             description: j.description ? j.description.substring(0, 2000) : undefined,
-            requirements: j.requirements ? j.requirements.substring(0, 1000) : undefined,
+            requirements: j.requirements || j.qualifications
+              ? (j.requirements || j.qualifications || '').substring(0, 1000) : undefined,
             apply_url: applyUrl,
             external_id: extId || undefined,
             source: feedName,
-            contract_type: mapContractType(j.contract_type || j.type || j.jobtype || j.job_type || j.contracttype),
-            work_schedule: mapWorkSchedule(j.work_schedule || j.hours || j.workschedule),
+            contract_type: mapContractType(j.contract_type || j.type || j.jobtype || j.job_type || j.contracttype || j.employment_type),
+            work_schedule: mapWorkSchedule(j.work_schedule || j.hours || j.workschedule || j.schedule),
             salary_min: j.salary_min ? parseInt(j.salary_min) : undefined,
             salary_max: j.salary_max ? parseInt(j.salary_max) : undefined,
             is_active: true,
@@ -208,9 +171,7 @@ Deno.serve(async (req) => {
           for (const k of Object.keys(mapped)) {
             if (mapped[k] === undefined || mapped[k] === null || mapped[k] === '') delete mapped[k];
           }
-
           if (!mapped.title) continue;
-
           jobsToCreate.push(mapped);
         }
 
@@ -219,32 +180,42 @@ Deno.serve(async (req) => {
         }
 
         if (feedConfig) {
+          const newTotal = (feedConfig.total_jobs_imported || 0) + jobsToCreate.length;
           await client.entities.XMLFeed.update(feedId, {
             last_import_date: new Date().toISOString(),
-            total_jobs_imported: (feedConfig.total_jobs_imported || 0) + jobsToCreate.length,
+            total_jobs_imported: newTotal,
             status: 'active',
           });
-          feedCache[feedId] = { ...feedConfig, total_jobs_imported: (feedConfig.total_jobs_imported || 0) + jobsToCreate.length };
+          feedCache[feedId] = { ...feedConfig, total_jobs_imported: newTotal };
         }
 
-        await client.entities.FeedChunk.update(chunk.id, {
-          status: 'done',
-          jobs_imported: jobsToCreate.length,
-        });
+        await client.entities.FeedChunk.update(chunk.id, { status: 'done', jobs_imported: jobsToCreate.length });
 
+        feedAggregates[feedId].imported += jobsToCreate.length;
+        feedAggregates[feedId].chunks += 1;
         totalImported += jobsToCreate.length;
-        results.push({
-          chunk_index: chunk.chunk_index,
-          feed: feedName,
-          imported: jobsToCreate.length,
-          skipped: jobs.length - jobsToCreate.length,
-        });
+        results.push({ chunk_index: chunk.chunk_index, feed: feedName, imported: jobsToCreate.length, skipped: jobs.length - jobsToCreate.length });
+
       } catch (err) {
-        await client.entities.FeedChunk.update(chunk.id, {
-          status: 'error',
-          error_message: err.message,
-        });
+        await client.entities.FeedChunk.update(chunk.id, { status: 'error', error_message: err.message });
+        if (feedAggregates[chunk.feed_id]) feedAggregates[chunk.feed_id].hasError = true;
         results.push({ chunk_index: chunk.chunk_index, error: err.message });
+      }
+    }
+
+    // Write ImportLog entries per feed
+    const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+    for (const [feedId, agg] of Object.entries(feedAggregates)) {
+      if (agg.imported > 0 || agg.hasError) {
+        await client.entities.ImportLog.create({
+          feed_id: feedId,
+          feed_name: agg.feedName,
+          jobs_imported: agg.imported,
+          jobs_skipped: agg.skipped,
+          chunks_processed: agg.chunks,
+          status: agg.hasError ? (agg.imported > 0 ? 'partial' : 'error') : 'success',
+          duration_seconds: durationSeconds,
+        });
       }
     }
 
@@ -254,6 +225,7 @@ Deno.serve(async (req) => {
       success: true,
       processed: toProcess.length,
       total_imported: totalImported,
+      total_skipped: totalSkipped,
       remaining_chunks: remaining.length,
       results,
     });
