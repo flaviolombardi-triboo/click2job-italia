@@ -83,11 +83,12 @@ export default function GestisciFeed() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex items-center justify-between mb-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Gestione Feed XML</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Aggiungi e gestisci i feed XML dei tuoi clienti per importare automaticamente le offerte di lavoro.
+            Importa offerte di lavoro da feed XML esterni in modo automatico o manuale.
           </p>
         </div>
         <Button
@@ -97,6 +98,37 @@ export default function GestisciFeed() {
           <Plus className="w-4 h-4 mr-2" />
           Aggiungi Feed
         </Button>
+      </div>
+
+      {/* How it works */}
+      <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-2xl p-5 mb-8">
+        <h2 className="font-semibold text-emerald-900 mb-3 flex items-center gap-2">
+          <FileText className="w-4 h-4" />
+          Come funziona
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">1</span>
+            <div>
+              <p className="font-medium text-emerald-900">Aggiungi un feed</p>
+              <p className="text-emerald-700 text-xs mt-0.5">Inserisci il nome e l'URL del feed XML (supporta anche file .gz compressi)</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">2</span>
+            <div>
+              <p className="font-medium text-emerald-900">Clicca "Avvia Import"</p>
+              <p className="text-emerald-700 text-xs mt-0.5">L'AI analizza il formato XML e importa tutti gli annunci automaticamente</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">3</span>
+            <div>
+              <p className="font-medium text-emerald-900">Aggiornamento ogni 4 ore</p>
+              <p className="text-emerald-700 text-xs mt-0.5">Il sistema importa automaticamente i nuovi annunci, senza duplicati</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Add Feed Dialog */}
