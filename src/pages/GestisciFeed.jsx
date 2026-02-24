@@ -219,18 +219,17 @@ export default function GestisciFeed() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
-                      variant="outline"
                       size="sm"
                       disabled={isImporting}
                       onClick={() => importFeedMutation.mutate(feed)}
-                      className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                     >
                       {isImporting ? (
-                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
                       ) : (
-                        <RefreshCw className="w-4 h-4 mr-1" />
+                        <RefreshCw className="w-4 h-4 mr-1.5" />
                       )}
-                      {isImporting ? "Importazione..." : "Importa"}
+                      {isImporting ? "Importazione in corso..." : "Avvia Import"}
                     </Button>
                     <Button
                       variant="ghost"
