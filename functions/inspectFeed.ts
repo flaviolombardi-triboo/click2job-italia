@@ -27,63 +27,72 @@ Deno.serve(async (req) => {
       url.endsWith('.gz') ||
       fetchRes.headers.get('content-encoding') === 'gzip';
 
+    // Read ONLY first 50KB of raw bytes from stream
+    const reader = fetchRes.body.getReader();
+    const rawChunks = [];
+    let totalRawBytes = 0;
+    const MAX_RAW = 50000; // 50KB raw
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      rawChunks.push(value);
+      totalRawBytes += value.length;
+      if (totalRawBytes >= MAX_RAW) break;
+    }
+    reader.cancel();
+
+    const rawMerged = new Uint8Array(totalRawBytes);
+    let rawOffset = 0;
+    for (const c of rawChunks) { rawMerged.set(c, rawOffset); rawOffset += c.length; }
+
     let xmlText = '';
 
     if (isGzip) {
-      const buffer = await fetchRes.arrayBuffer();
+      // Decompress only the small raw chunk
       const ds = new DecompressionStream('gzip');
       const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-      writer.write(new Uint8Array(buffer));
-      writer.close();
-      const chunks = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        // Stop after ~200KB to avoid memory issues
-        const totalSoFar = chunks.reduce((a, c) => a + c.length, 0);
-        if (totalSoFar > 200000) break;
+      const dsReader = ds.readable.getReader();
+
+      writer.write(rawMerged).catch(() => {});
+      writer.close().catch(() => {});
+
+      const decompChunks = [];
+      let decompTotal = 0;
+      const MAX_DECOMP = 30000;
+      try {
+        while (decompTotal < MAX_DECOMP) {
+          const { done, value } = await Promise.race([
+            dsReader.read(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+          ]);
+          if (done) break;
+          decompChunks.push(value);
+          decompTotal += value.length;
+        }
+      } catch (_) {
+        // partial decomp is fine
       }
-      const total = chunks.reduce((acc, c) => acc + c.length, 0);
-      const merged = new Uint8Array(total);
+
+      const merged = new Uint8Array(decompTotal);
       let offset = 0;
-      for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+      for (const c of decompChunks) { merged.set(c, offset); offset += c.length; }
       xmlText = new TextDecoder().decode(merged);
     } else {
-      // Read only first 200KB
-      const reader = fetchRes.body.getReader();
-      const chunks = [];
-      let totalBytes = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        totalBytes += value.length;
-        if (totalBytes > 200000) break;
-      }
-      const merged = new Uint8Array(totalBytes);
-      let offset = 0;
-      for (const c of chunks) { merged.set(c, offset); offset += c.length; }
-      xmlText = new TextDecoder().decode(merged);
+      xmlText = new TextDecoder().decode(rawMerged);
     }
 
-    // Extract first 8000 chars sample
-    const sample = xmlText.substring(0, 8000);
+    const sample = xmlText.substring(0, 6000);
 
-    // Try to detect root element and repeating item tag
-    const rootMatch = sample.match(/<([a-zA-Z][a-zA-Z0-9_:-]*)[^>]*>/);
-    const rootTag = rootMatch ? rootMatch[1] : null;
-
-    // Find all unique tags in the first 3000 chars
-    const tagMatches = [...sample.substring(0, 3000).matchAll(/<([a-zA-Z][a-zA-Z0-9_:-]*)[\s>]/g)];
+    // Count tags
+    const tagMatches = [...sample.matchAll(/<([a-zA-Z][a-zA-Z0-9_:-]*)[\s>/]/g)];
     const tagCounts = {};
     for (const m of tagMatches) {
       tagCounts[m[1]] = (tagCounts[m[1]] || 0) + 1;
     }
-
-    // The repeating item tag is likely the one that appears most after the root
     const sortedTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
+
+    const rootMatch = sample.match(/<([a-zA-Z][a-zA-Z0-9_:-]*)[^>]*>/);
+    const rootTag = rootMatch ? rootMatch[1] : null;
 
     return Response.json({
       is_gzip: isGzip,
