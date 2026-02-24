@@ -25,10 +25,15 @@ export default function GestisciFeed() {
   const [authLoading, setAuthLoading] = useState(true);
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    base44.auth.me().then((u) => { setUser(u); setAuthLoading(false); }).catch(() => setAuthLoading(false));
+  }, []);
+
   const { data: feeds, isLoading } = useQuery({
     queryKey: ["xml-feeds"],
     queryFn: () => base44.entities.XMLFeed.list("-created_date", 100),
     initialData: [],
+    enabled: user?.role === "admin",
   });
 
   const createFeedMutation = useMutation({
