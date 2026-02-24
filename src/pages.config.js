@@ -47,28 +47,28 @@
  *
  * The mainPage value must match a key in the PAGES object exactly.
  */
-import Home from './pages/Home';
-import RisultatiRicerca from './pages/RisultatiRicerca';
-import DettaglioOfferta from './pages/DettaglioOfferta';
-import Stipendi from './pages/Stipendi';
-import ElencoProfessioni from './pages/ElencoProfessioni';
-import DettaglioProfessione from './pages/DettaglioProfessione';
 import CercaPerCitta from './pages/CercaPerCitta';
-import PubblicaOfferta from './pages/PubblicaOfferta';
+import DettaglioOfferta from './pages/DettaglioOfferta';
+import DettaglioProfessione from './pages/DettaglioProfessione';
+import ElencoProfessioni from './pages/ElencoProfessioni';
 import GestisciFeed from './pages/GestisciFeed';
+import Home from './pages/Home';
+import PubblicaOfferta from './pages/PubblicaOfferta';
+import RisultatiRicerca from './pages/RisultatiRicerca';
+import Stipendi from './pages/Stipendi';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
-    "Home": Home,
-    "RisultatiRicerca": RisultatiRicerca,
-    "DettaglioOfferta": DettaglioOfferta,
-    "Stipendi": Stipendi,
-    "ElencoProfessioni": ElencoProfessioni,
-    "DettaglioProfessione": DettaglioProfessione,
     "CercaPerCitta": CercaPerCitta,
-    "PubblicaOfferta": PubblicaOfferta,
+    "DettaglioOfferta": DettaglioOfferta,
+    "DettaglioProfessione": DettaglioProfessione,
+    "ElencoProfessioni": ElencoProfessioni,
     "GestisciFeed": GestisciFeed,
+    "Home": Home,
+    "PubblicaOfferta": PubblicaOfferta,
+    "RisultatiRicerca": RisultatiRicerca,
+    "Stipendi": Stipendi,
 }
 
 export const pagesConfig = {

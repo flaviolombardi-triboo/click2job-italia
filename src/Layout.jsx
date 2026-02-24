@@ -38,7 +38,8 @@ export default function Layout({ children, currentPageName }) {
               <img
                 src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
                 alt="Click2Job"
-                className="h-9 w-auto"
+                className="h-9 w-auto object-contain"
+                style={{ background: "transparent" }}
               />
             </Link>
 
