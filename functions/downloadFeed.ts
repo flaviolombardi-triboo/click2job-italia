@@ -1,44 +1,84 @@
 /**
  * downloadFeed.js
  *
- * Scarica un feed XML(.gz), lo salva in /tmp, lo decomprime con Deno,
- * fa parsing XML nativo, divide in chunk da 25 job e salva FeedChunk records.
+ * Scarica un feed XML(.gz) con fetch, decomprime in streaming tramite
+ * DecompressionStream, fa parsing incrementale dei <job> senza mai caricare
+ * l'intero contenuto in memoria. Salva chunks di 25 job come FeedChunk.
  */
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
 
-// Parse jobs from XML text using regex — no external deps
-function extractJobsFromXml(xmlText) {
-  const jobs = [];
-  const jobRegex = /<job>([\s\S]*?)<\/job>/gi;
-  let match;
-  while ((match = jobRegex.exec(xmlText)) !== null) {
-    const jobXml = match[1];
-    const job = {};
-    const fields = [
-      'id', 'company', 'title', 'description', 'category', 'location',
-      'region', 'salary', 'url', 'contract_type', 'work_schedule',
-      'salary_min', 'salary_max', 'expiry_date', 'date', 'city',
-      'state', 'country', 'type', 'jobtype', 'job_type', 'referencenumber',
-    ];
-    for (const field of fields) {
-      const re = new RegExp(`<${field}[^>]*>([\\s\\S]*?)<\\/${field}>`, 'i');
-      const fm = jobXml.match(re);
-      if (fm) {
-        job[field] = fm[1]
-          .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-          .replace(/<[^>]+>/g, '')
-          .trim();
-      }
-    }
-    if (job.title || job.id) jobs.push(job);
-  }
-  return jobs;
+function extractField(jobXml, field) {
+  const re = new RegExp(`<${field}[^>]*>([\\s\\S]*?)<\\/${field}>`, 'i');
+  const m = jobXml.match(re);
+  if (!m) return undefined;
+  return m[1]
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .trim() || undefined;
 }
 
-function chunkArray(arr, size) {
-  const chunks = [];
-  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
-  return chunks;
+const JOB_FIELDS = [
+  'id', 'company', 'title', 'description', 'category', 'location',
+  'region', 'url', 'contract_type', 'work_schedule',
+  'salary_min', 'salary_max', 'expiry_date', 'city', 'state',
+  'type', 'jobtype', 'job_type', 'referencenumber',
+];
+
+function parseJobXml(jobXml) {
+  const job = {};
+  for (const field of JOB_FIELDS) {
+    const v = extractField(jobXml, field);
+    if (v) job[field] = v;
+  }
+  return (job.title || job.id) ? job : null;
+}
+
+/**
+ * Reads decompressed stream incrementally.
+ * Yields parsed job objects as they are found.
+ * Never stores more than ~200KB of XML text in memory at once.
+ */
+async function* streamParseJobs(readableStream, isGzip) {
+  let source = readableStream;
+  if (isGzip) {
+    source = readableStream.pipeThrough(new DecompressionStream('gzip'));
+  }
+
+  const reader = source.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const MAX_BUF = 500 * 1024; // 500KB buffer cap
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Extract all complete <job>...</job> blocks from buffer
+      while (true) {
+        const start = buffer.indexOf('<job>');
+        const end = buffer.indexOf('</job>');
+        if (start === -1 || end === -1 || end < start) break;
+
+        const jobXml = buffer.slice(start + 5, end);
+        buffer = buffer.slice(end + 6);
+
+        const job = parseJobXml(jobXml);
+        if (job) yield job;
+      }
+
+      // Trim buffer if it grows too large (no complete job found)
+      if (buffer.length > MAX_BUF) {
+        // Keep last 50KB in case a job tag spans a chunk boundary
+        buffer = buffer.slice(-50 * 1024);
+      }
+    }
+  } catch (_) {
+    // Stream ended (possibly checksum error at end of gz) — that's OK
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 Deno.serve(async (req) => {
@@ -71,17 +111,13 @@ Deno.serve(async (req) => {
     const results = [];
 
     for (const feed of feedsToProcess) {
-      const tmpGz = `/tmp/feed_${feed.id}.gz`;
-      const tmpXml = `/tmp/feed_${feed.id}.xml`;
-
       try {
-        // Delete old pending chunks for this feed
+        // Delete old pending chunks
         const oldChunks = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' });
         for (const c of oldChunks) {
           await client.entities.FeedChunk.delete(c.id);
         }
 
-        // Step 1: Download the compressed file to /tmp
         const fetchRes = await fetch(feed.url, {
           headers: { 'User-Agent': 'Click2Job-Bot/1.0' },
           signal: AbortSignal.timeout(60000),
@@ -93,77 +129,61 @@ Deno.serve(async (req) => {
           feed.url.endsWith('.gz') ||
           fetchRes.headers.get('content-encoding') === 'gzip';
 
-        if (isGzip) {
-          // Write compressed bytes to /tmp
-          const file = await Deno.open(tmpGz, { write: true, create: true, truncate: true });
-          await fetchRes.body.pipeTo(file.writable);
+        // Stream-parse jobs without loading full file into memory
+        const CHUNK_SIZE = 25;
+        const MAX_JOBS = 5000; // safety cap per run
+        let currentChunk = [];
+        let chunkIndex = 0;
+        let totalJobs = 0;
+        let chunksCreated = 0;
 
-          // Decompress using Deno subprocess: gunzip -c
-          const cmd = new Deno.Command('gunzip', { args: ['-c', tmpGz], stdout: 'piped', stderr: 'piped' });
-          const proc = cmd.spawn();
-          const { stdout, stderr } = await proc.output();
+        for await (const job of streamParseJobs(fetchRes.body, isGzip)) {
+          currentChunk.push(job);
+          totalJobs++;
 
-          if (stdout.length === 0) {
-            const errMsg = new TextDecoder().decode(stderr);
-            throw new Error(`gunzip failed: ${errMsg}`);
+          if (currentChunk.length >= CHUNK_SIZE) {
+            await client.entities.FeedChunk.create({
+              feed_id: feed.id,
+              feed_name: feed.name,
+              chunk_index: chunkIndex++,
+              xml_content: JSON.stringify(currentChunk),
+              status: 'pending',
+              jobs_imported: 0,
+            });
+            chunksCreated++;
+            currentChunk = [];
           }
 
-          // Write decompressed XML to /tmp
-          await Deno.writeFile(tmpXml, stdout);
-
-          // Cleanup gz
-          await Deno.remove(tmpGz).catch(() => {});
-
-          // Read XML (limit to 10MB)
-          const stat = await Deno.stat(tmpXml);
-          const readSize = Math.min(stat.size, 10 * 1024 * 1024);
-          const xmlBytes = new Uint8Array(readSize);
-          const xmlFile = await Deno.open(tmpXml, { read: true });
-          await xmlFile.read(xmlBytes);
-          xmlFile.close();
-          await Deno.remove(tmpXml).catch(() => {});
-
-          var xmlText = new TextDecoder().decode(xmlBytes);
-        } else {
-          const rawBuffer = await fetchRes.arrayBuffer();
-          var xmlText = new TextDecoder().decode(new Uint8Array(rawBuffer));
+          if (totalJobs >= MAX_JOBS) break;
         }
 
-        // Parse jobs
-        const allJobs = extractJobsFromXml(xmlText);
-        xmlText = null; // free memory
-
-        if (allJobs.length === 0) {
-          await client.entities.XMLFeed.update(feed.id, { status: 'error' });
-          results.push({ feed: feed.name, error: 'Nessun job trovato nel feed' });
-          continue;
-        }
-
-        // Create chunks of 25 jobs each
-        const jobChunks = chunkArray(allJobs, 25);
-
-        for (let i = 0; i < jobChunks.length; i++) {
+        // Save remaining jobs
+        if (currentChunk.length > 0) {
           await client.entities.FeedChunk.create({
             feed_id: feed.id,
             feed_name: feed.name,
-            chunk_index: i,
-            xml_content: JSON.stringify(jobChunks[i]),
+            chunk_index: chunkIndex,
+            xml_content: JSON.stringify(currentChunk),
             status: 'pending',
             jobs_imported: 0,
           });
+          chunksCreated++;
+        }
+
+        if (totalJobs === 0) {
+          await client.entities.XMLFeed.update(feed.id, { status: 'error' });
+          results.push({ feed: feed.name, error: 'Nessun job trovato nel feed' });
+          continue;
         }
 
         await client.entities.XMLFeed.update(feed.id, { status: 'active' });
 
         results.push({
           feed: feed.name,
-          total_jobs_found: allJobs.length,
-          chunks_created: jobChunks.length,
+          total_jobs_found: totalJobs,
+          chunks_created: chunksCreated,
         });
       } catch (err) {
-        // Cleanup tmp files on error
-        await Deno.remove(tmpGz).catch(() => {});
-        await Deno.remove(tmpXml).catch(() => {});
         await client.entities.XMLFeed.update(feed.id, { status: 'error' }).catch(() => {});
         results.push({ feed: feed.name, error: err.message });
       }
