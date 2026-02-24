@@ -165,9 +165,9 @@ export default function Layout({ children, currentPageName }) {
             {/* Brand */}
             <div>
               <img
-                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/a4c3e9cc7_C2J-colore-orizz.png"
+                src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/699c6b730db78c556829abda/d63123fc4_logo-white.png"
                 alt="Click2Job"
-                className="h-8 w-auto mb-4 brightness-0 invert"
+                className="h-8 w-auto mb-4"
               />
               <p className="text-sm leading-relaxed">
                 Il motore di ricerca lavoro in Italia. Trova migliaia di offerte di lavoro aggiornate ogni giorno.
