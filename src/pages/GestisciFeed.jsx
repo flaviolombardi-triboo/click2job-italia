@@ -144,32 +144,62 @@ export default function GestisciFeed() {
         </Button>
       </div>
 
+      {/* Pending chunks status bar */}
+      {pendingChunks && pendingChunks.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">Elaborazione in corso</p>
+              <p className="text-xs text-amber-700">{pendingChunks.length} chunk in attesa (ogni chunk = 25 annunci)</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-300 text-amber-800 hover:bg-amber-100"
+            onClick={() => processChunksMutation.mutate()}
+            disabled={processChunksMutation.isPending}
+          >
+            {processChunksMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+            Processa ora
+          </Button>
+        </div>
+      )}
+
       {/* How it works */}
       <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-2xl p-5 mb-8">
         <h2 className="font-semibold text-emerald-900 mb-3 flex items-center gap-2">
           <FileText className="w-4 h-4" />
           Come funziona
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-sm">
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">1</span>
             <div>
               <p className="font-medium text-emerald-900">Aggiungi un feed</p>
-              <p className="text-emerald-700 text-xs mt-0.5">Inserisci il nome e l'URL del feed XML (supporta anche file .gz compressi)</p>
+              <p className="text-emerald-700 text-xs mt-0.5">Inserisci nome e URL del feed XML (supporta anche .gz)</p>
             </div>
           </div>
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">2</span>
             <div>
-              <p className="font-medium text-emerald-900">Clicca "Avvia Import"</p>
-              <p className="text-emerald-700 text-xs mt-0.5">L'AI analizza il formato XML e importa tutti gli annunci automaticamente</p>
+              <p className="font-medium text-emerald-900">Download feed</p>
+              <p className="text-emerald-700 text-xs mt-0.5">"Avvia Import" scarica e divide il feed in blocchi da 25 annunci</p>
             </div>
           </div>
           <div className="flex gap-3">
             <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">3</span>
             <div>
+              <p className="font-medium text-emerald-900">Elaborazione blocchi</p>
+              <p className="text-emerald-700 text-xs mt-0.5">Il sistema elabora ogni blocco ogni 5 minuti, senza limiti di memoria</p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">4</span>
+            <div>
               <p className="font-medium text-emerald-900">Aggiornamento ogni 4 ore</p>
-              <p className="text-emerald-700 text-xs mt-0.5">Il sistema importa automaticamente i nuovi annunci, senza duplicati</p>
+              <p className="text-emerald-700 text-xs mt-0.5">Nuovi annunci importati automaticamente, duplicati esclusi</p>
             </div>
           </div>
         </div>
