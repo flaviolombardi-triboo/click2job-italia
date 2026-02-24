@@ -2,8 +2,9 @@
  * downloadFeed.js
  *
  * Scarica un feed XML(.gz) con fetch, decomprime in streaming tramite
- * DecompressionStream, fa parsing incrementale dei <job> senza mai caricare
- * l'intero contenuto in memoria. Salva chunks di 25 job come FeedChunk.
+ * DecompressionStream, fa parsing incrementale dei tag job (configurabile)
+ * senza mai caricare l'intero contenuto in memoria.
+ * Supporta field_mapping per trasformazioni custom dei campi.
  */
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
 
@@ -17,31 +18,36 @@ function extractField(jobXml, field) {
     .trim() || undefined;
 }
 
-const JOB_FIELDS = [
-  'id', 'company', 'title', 'description', 'category', 'location',
-  'region', 'url', 'contract_type', 'work_schedule',
-  'salary_min', 'salary_max', 'expiry_date', 'city', 'state',
-  'type', 'jobtype', 'job_type', 'referencenumber',
-];
-
+/**
+ * Estrae tutti i campi XML da un blocco job.
+ * Raccoglie qualsiasi tag trovato, non solo quelli predefiniti.
+ */
 function parseJobXml(jobXml) {
   const job = {};
-  for (const field of JOB_FIELDS) {
-    let v = extractField(jobXml, field);
-    if (!v) continue;
-    // Truncate description to 800 chars to keep chunk size small
-    if (field === 'description' && v.length > 800) v = v.substring(0, 800);
-    job[field] = v;
+  // Trova tutti i tag di primo livello nel blocco
+  const tagRe = /<([a-zA-Z_][a-zA-Z0-9_:-]*)[^>]*>([\s\S]*?)<\/\1>/g;
+  let m;
+  while ((m = tagRe.exec(jobXml)) !== null) {
+    const field = m[1].toLowerCase();
+    let val = m[2]
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    if (!val) continue;
+    // Truncate description-like fields
+    if (['description', 'summary', 'body', 'detail', 'content'].includes(field) && val.length > 800) {
+      val = val.substring(0, 800);
+    }
+    job[field] = val;
   }
-  return (job.title || job.id) ? job : null;
+  return (job.title || job.id || job.referencenumber) ? job : null;
 }
 
 /**
- * Reads decompressed stream incrementally.
- * Yields parsed job objects as they are found.
- * Never stores more than ~200KB of XML text in memory at once.
+ * Legge lo stream decomprimendo se gz.
+ * Usa il jobTag configurabile per trovare i blocchi (default: "job").
  */
-async function* streamParseJobs(readableStream, isGzip) {
+async function* streamParseJobs(readableStream, isGzip, jobTag = 'job') {
   let source = readableStream;
   if (isGzip) {
     source = readableStream.pipeThrough(new DecompressionStream('gzip'));
@@ -50,7 +56,9 @@ async function* streamParseJobs(readableStream, isGzip) {
   const reader = source.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const MAX_BUF = 500 * 1024; // 500KB buffer cap
+  const MAX_BUF = 500 * 1024;
+  const openTag = `<${jobTag}`;
+  const closeTag = `</${jobTag}>`;
 
   try {
     while (true) {
@@ -58,27 +66,36 @@ async function* streamParseJobs(readableStream, isGzip) {
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // Extract all complete <job>...</job> blocks from buffer
       while (true) {
-        const start = buffer.indexOf('<job>');
-        const end = buffer.indexOf('</job>');
+        const start = buffer.indexOf(openTag);
+        const end = buffer.indexOf(closeTag);
         if (start === -1 || end === -1 || end < start) break;
 
-        const jobXml = buffer.slice(start + 5, end);
-        buffer = buffer.slice(end + 6);
+        const closeOfOpenTag = buffer.indexOf('>', start);
+        const jobXml = buffer.slice(closeOfOpenTag + 1, end);
+        buffer = buffer.slice(end + closeTag.length);
 
         const job = parseJobXml(jobXml);
         if (job) yield job;
       }
 
-      // Trim buffer if it grows too large (no complete job found)
       if (buffer.length > MAX_BUF) {
-        // Keep last 50KB in case a job tag spans a chunk boundary
         buffer = buffer.slice(-50 * 1024);
       }
     }
+    // Process any remaining buffer
+    while (true) {
+      const start = buffer.indexOf(openTag);
+      const end = buffer.indexOf(closeTag);
+      if (start === -1 || end === -1 || end < start) break;
+      const closeOfOpenTag = buffer.indexOf('>', start);
+      const jobXml = buffer.slice(closeOfOpenTag + 1, end);
+      buffer = buffer.slice(end + closeTag.length);
+      const job = parseJobXml(jobXml);
+      if (job) yield job;
+    }
   } catch (_) {
-    // Stream ended (possibly checksum error at end of gz) — that's OK
+    // Stream ended — ok
   } finally {
     reader.releaseLock();
   }
@@ -90,15 +107,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const targetFeedId = body.feed_id || null;
 
-    // Auth: allow admin or scheduler (no user)
     try {
       const user = await base44.auth.me();
       if (user?.role !== 'admin') {
         return Response.json({ error: 'Forbidden' }, { status: 403 });
       }
-    } catch (_) {
-      // scheduler — ok
-    }
+    } catch (_) { /* scheduler */ }
 
     const client = base44.asServiceRole;
 
@@ -115,7 +129,7 @@ Deno.serve(async (req) => {
 
     for (const feed of feedsToProcess) {
       try {
-        // Delete old pending chunks
+        // Delete old pending chunks for this feed
         const oldChunks = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' });
         for (const c of oldChunks) {
           await client.entities.FeedChunk.delete(c.id);
@@ -132,16 +146,17 @@ Deno.serve(async (req) => {
           feed.url.endsWith('.gz') ||
           fetchRes.headers.get('content-encoding') === 'gzip';
 
-        // Stream-parse jobs without loading full file into memory
-        const CHUNK_SIZE = 10; // smaller chunks to stay under field size limit
-        const MAX_JOBS = 2000; // safety cap per run
-        const MAX_CHUNKS_PER_RUN = 20; // avoid rate-limit — 20 chunks × 10 jobs = 200 jobs per run
+        const jobTag = feed.job_tag || 'job';
+
+        const CHUNK_SIZE = 10;
+        const MAX_JOBS = 2000;
+        const MAX_CHUNKS_PER_RUN = 20;
         let currentChunk = [];
         let chunkIndex = 0;
         let totalJobs = 0;
         let chunksCreated = 0;
 
-        for await (const job of streamParseJobs(fetchRes.body, isGzip)) {
+        for await (const job of streamParseJobs(fetchRes.body, isGzip, jobTag)) {
           currentChunk.push(job);
           totalJobs++;
 
@@ -156,14 +171,12 @@ Deno.serve(async (req) => {
             });
             chunksCreated++;
             currentChunk = [];
-            // Pause every 5 chunks to avoid rate-limit
             if (chunksCreated % 5 === 0) await new Promise(r => setTimeout(r, 2000));
           }
 
           if (totalJobs >= MAX_JOBS || chunksCreated >= MAX_CHUNKS_PER_RUN) break;
         }
 
-        // Save remaining jobs
         if (currentChunk.length > 0) {
           await client.entities.FeedChunk.create({
             feed_id: feed.id,
