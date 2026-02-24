@@ -88,6 +88,18 @@ export default function GestisciFeed() {
     error: { icon: AlertCircle, color: "bg-red-50 text-red-700", label: "Errore" },
   };
 
+  if (authLoading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
+
+  if (!user || user.role !== "admin") {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-4 text-center px-4">
+        <Lock className="w-10 h-10 text-gray-300" />
+        <h2 className="text-lg font-semibold text-gray-700">Area riservata</h2>
+        <p className="text-gray-500 text-sm">Questa sezione è accessibile solo agli amministratori del sito.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
