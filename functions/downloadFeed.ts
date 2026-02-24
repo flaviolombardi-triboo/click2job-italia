@@ -106,52 +106,40 @@ Deno.serve(async (req) => {
         let xmlText = '';
 
         if (isGzip) {
-          const rawReader = fetchRes.body.getReader();
+          // Download the ENTIRE compressed file first (gzip checksum is at the end)
+          const rawBuffer = await fetchRes.arrayBuffer();
+          const rawBytes = new Uint8Array(rawBuffer);
+
+          // Decompress fully
           const ds = new DecompressionStream('gzip');
-          const dsWriter = ds.writable.getWriter();
-          const dsReader = ds.readable.getReader();
+          const writer = ds.writable.getWriter();
+          const reader = ds.readable.getReader();
 
-          // Pipe raw bytes to decompressor in background
-          (async () => {
-            try {
-              while (true) {
-                const { done, value } = await rawReader.read();
-                if (done) { dsWriter.close(); break; }
-                await dsWriter.write(value);
-              }
-            } catch (_) { dsWriter.abort(); }
-          })();
+          // Write all compressed data then close
+          writer.write(rawBytes).catch(() => {});
+          writer.close().catch(() => {});
 
-          // Read decompressed output
+          // Read all decompressed output, stop at MAX_DECOMP_BYTES
           const decompChunks = [];
           let decompTotal = 0;
-          while (decompTotal < MAX_DECOMP_BYTES) {
-            const { done, value } = await dsReader.read();
-            if (done) break;
-            decompChunks.push(value);
-            decompTotal += value.length;
+          try {
+            while (decompTotal < MAX_DECOMP_BYTES) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              decompChunks.push(value);
+              decompTotal += value.length;
+            }
+          } catch (_) {
+            // ignore checksum error if we already have enough data
           }
-          rawReader.cancel();
 
           const merged = new Uint8Array(decompTotal);
           let off = 0;
           for (const c of decompChunks) { merged.set(c, off); off += c.length; }
           xmlText = new TextDecoder().decode(merged);
         } else {
-          const rawReader = fetchRes.body.getReader();
-          const rawChunks = [];
-          let rawTotal = 0;
-          while (rawTotal < MAX_DECOMP_BYTES) {
-            const { done, value } = await rawReader.read();
-            if (done) break;
-            rawChunks.push(value);
-            rawTotal += value.length;
-          }
-          rawReader.cancel();
-          const merged = new Uint8Array(rawTotal);
-          let off = 0;
-          for (const c of rawChunks) { merged.set(c, off); off += c.length; }
-          xmlText = new TextDecoder().decode(merged);
+          const rawBuffer = await fetchRes.arrayBuffer();
+          xmlText = new TextDecoder().decode(new Uint8Array(rawBuffer));
         }
 
         // Parse all jobs from XML
