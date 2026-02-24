@@ -1,14 +1,12 @@
 /**
  * downloadFeed.js
- * 
- * Scarica un feed XML(.gz), lo divide in chunk da 25 job ciascuno,
- * salva ogni chunk come record FeedChunk con status="pending".
- * 
- * Viene chiamato ogni 4 ore dall'automation, oppure manualmente passando feed_id.
+ *
+ * Scarica un feed XML(.gz), lo salva in /tmp, lo decomprime con Deno,
+ * fa parsing XML nativo, divide in chunk da 25 job e salva FeedChunk records.
  */
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
 
-// Parse XML natively usando regex (nessuna dipendenza esterna)
+// Parse jobs from XML text using regex — no external deps
 function extractJobsFromXml(xmlText) {
   const jobs = [];
   const jobRegex = /<job>([\s\S]*?)<\/job>/gi;
@@ -16,14 +14,12 @@ function extractJobsFromXml(xmlText) {
   while ((match = jobRegex.exec(xmlText)) !== null) {
     const jobXml = match[1];
     const job = {};
-
     const fields = [
       'id', 'company', 'title', 'description', 'category', 'location',
       'region', 'salary', 'url', 'contract_type', 'work_schedule',
       'salary_min', 'salary_max', 'expiry_date', 'date', 'city',
-      'state', 'country', 'type', 'jobtype', 'job_type',
+      'state', 'country', 'type', 'jobtype', 'job_type', 'referencenumber',
     ];
-
     for (const field of fields) {
       const re = new RegExp(`<${field}[^>]*>([\\s\\S]*?)<\\/${field}>`, 'i');
       const fm = jobXml.match(re);
@@ -34,19 +30,14 @@ function extractJobsFromXml(xmlText) {
           .trim();
       }
     }
-
-    if (job.title || job.id) {
-      jobs.push(job);
-    }
+    if (job.title || job.id) jobs.push(job);
   }
   return jobs;
 }
 
 function chunkArray(arr, size) {
   const chunks = [];
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size));
-  }
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
   return chunks;
 }
 
@@ -80,80 +71,65 @@ Deno.serve(async (req) => {
     const results = [];
 
     for (const feed of feedsToProcess) {
+      const tmpGz = `/tmp/feed_${feed.id}.gz`;
+      const tmpXml = `/tmp/feed_${feed.id}.xml`;
+
       try {
-        // Delete old pending/error chunks for this feed to avoid re-processing stale data
+        // Delete old pending chunks for this feed
         const oldChunks = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' });
         for (const c of oldChunks) {
           await client.entities.FeedChunk.delete(c.id);
         }
 
-        // Fetch feed
+        // Step 1: Download the compressed file to /tmp
         const fetchRes = await fetch(feed.url, {
           headers: { 'User-Agent': 'Click2Job-Bot/1.0' },
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(60000),
         });
-
         if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}`);
 
-        const contentType = fetchRes.headers.get('content-type') || '';
         const isGzip =
-          contentType.includes('gzip') ||
+          (fetchRes.headers.get('content-type') || '').includes('gzip') ||
           feed.url.endsWith('.gz') ||
           fetchRes.headers.get('content-encoding') === 'gzip';
 
-        // Stream and decompress in chunks, stop at 5MB decompressed
-        const MAX_DECOMP_BYTES = 5 * 1024 * 1024;
-        let xmlText = '';
-
         if (isGzip) {
-          // Download full compressed buffer
-          const rawBuffer = await fetchRes.arrayBuffer();
-          const rawBytes = new Uint8Array(rawBuffer);
+          // Write compressed bytes to /tmp
+          const file = await Deno.open(tmpGz, { write: true, create: true, truncate: true });
+          await fetchRes.body.pipeTo(file.writable);
 
-          // Decompress: pipe compressed bytes through DecompressionStream
-          // We read from the readable side while writing on the writable side concurrently
-          const ds = new DecompressionStream('gzip');
-          const reader = ds.readable.getReader();
-          const writer = ds.writable.getWriter();
+          // Decompress using Deno subprocess: gunzip -c
+          const cmd = new Deno.Command('gunzip', { args: ['-c', tmpGz], stdout: 'piped', stderr: 'piped' });
+          const proc = cmd.spawn();
+          const { stdout, stderr } = await proc.output();
 
-          const decompChunks = [];
-          let decompTotal = 0;
-
-          // Start reading decompressed output concurrently
-          const readPromise = (async () => {
-            try {
-              while (decompTotal < MAX_DECOMP_BYTES) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                decompChunks.push(value);
-                decompTotal += value.length;
-              }
-            } catch (_) {
-              // ignore checksum/truncation errors — we have the data already
-            }
-          })();
-
-          // Write all compressed data then close writer
-          try {
-            await writer.write(rawBytes);
-            await writer.close();
-          } catch (_) {
-            // ignore close errors
+          if (stdout.length === 0) {
+            const errMsg = new TextDecoder().decode(stderr);
+            throw new Error(`gunzip failed: ${errMsg}`);
           }
 
-          // Wait for reader to finish
-          await readPromise;
+          // Write decompressed XML to /tmp
+          await Deno.writeFile(tmpXml, stdout);
 
-          const merged = new Uint8Array(decompTotal);
-          let off = 0;
-          for (const c of decompChunks) { merged.set(c, off); off += c.length; }
-          xmlText = new TextDecoder().decode(merged);
+          // Cleanup gz
+          await Deno.remove(tmpGz).catch(() => {});
+
+          // Read XML (limit to 10MB)
+          const stat = await Deno.stat(tmpXml);
+          const readSize = Math.min(stat.size, 10 * 1024 * 1024);
+          const xmlBytes = new Uint8Array(readSize);
+          const xmlFile = await Deno.open(tmpXml, { read: true });
+          await xmlFile.read(xmlBytes);
+          xmlFile.close();
+          await Deno.remove(tmpXml).catch(() => {});
+
+          var xmlText = new TextDecoder().decode(xmlBytes);
         } else {
           const rawBuffer = await fetchRes.arrayBuffer();
-          xmlText = new TextDecoder().decode(new Uint8Array(rawBuffer));
+          var xmlText = new TextDecoder().decode(new Uint8Array(rawBuffer));
         }
 
-        // Parse all jobs from XML
+        // Parse jobs
         const allJobs = extractJobsFromXml(xmlText);
         xmlText = null; // free memory
 
@@ -163,10 +139,9 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Divide in chunks of 25
+        // Create chunks of 25 jobs each
         const jobChunks = chunkArray(allJobs, 25);
 
-        // Save each chunk as FeedChunk record
         for (let i = 0; i < jobChunks.length; i++) {
           await client.entities.FeedChunk.create({
             feed_id: feed.id,
@@ -178,9 +153,7 @@ Deno.serve(async (req) => {
           });
         }
 
-        await client.entities.XMLFeed.update(feed.id, {
-          status: 'active',
-        });
+        await client.entities.XMLFeed.update(feed.id, { status: 'active' });
 
         results.push({
           feed: feed.name,
@@ -188,7 +161,10 @@ Deno.serve(async (req) => {
           chunks_created: jobChunks.length,
         });
       } catch (err) {
-        await client.entities.XMLFeed.update(feed.id, { status: 'error' });
+        // Cleanup tmp files on error
+        await Deno.remove(tmpGz).catch(() => {});
+        await Deno.remove(tmpXml).catch(() => {});
+        await client.entities.XMLFeed.update(feed.id, { status: 'error' }).catch(() => {});
         results.push({ feed: feed.name, error: err.message });
       }
     }
