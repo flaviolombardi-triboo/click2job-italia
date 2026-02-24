@@ -130,14 +130,13 @@ function cleanLocation(raw) {
   return l.substring(0, 100) || undefined;
 }
 
-/** Descrizione: rimuove duplicazioni di spazi/newline, tronca */
+/** Descrizione: rimuove duplicazioni di spazi/newline, nessun troncamento */
 function cleanDescription(raw) {
   if (!raw) return undefined;
   return raw
     .replace(/(\n\s*){3,}/g, '\n\n')   // max 2 righe vuote consecutive
     .replace(/\s{3,}/g, '  ')
-    .trim()
-    .substring(0, 2000) || undefined;
+    .trim() || undefined;
 }
 
 /** Salary: estrae il primo numero da stringhe tipo "30.000 €" o "30000-40000" */
