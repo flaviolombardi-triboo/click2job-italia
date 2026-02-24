@@ -109,7 +109,7 @@ export default function Layout({ children, currentPageName }) {
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Building2 className="w-4 h-4" />
-                Area Aziende
+                Posta un'offerta
               </Link>
             </div>
           </div>
