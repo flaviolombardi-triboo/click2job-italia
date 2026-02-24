@@ -1,62 +1,78 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Building2, Zap, Users, Shield, CheckCircle, ArrowRight } from "lucide-react";
+import { Building2, Zap, Users, Shield, CheckCircle, ArrowRight, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "sonner";
+
+const ADMIN_EMAIL = "info@click2job.it";
 
 export default function PubblicaOfferta() {
   const [form, setForm] = useState({
-    title: "",
+    contact_name: "",
+    contact_email: "",
+    contact_phone: "",
     company: "",
     location: "",
-    category: "",
+    title: "",
     contract_type: "",
-    work_schedule: "full_time",
-    salary_min: "",
-    salary_max: "",
     description: "",
-    requirements: "",
-    benefits: "",
-    apply_url: "",
+    notes: "",
   });
+  const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const queryClient = useQueryClient();
 
-  const mutation = useMutation({
-    mutationFn: (data) => base44.entities.JobOffer.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["latest-jobs"] });
-      setSubmitted(true);
-    },
-  });
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const data = {
-      ...form,
-      salary_min: form.salary_min ? Number(form.salary_min) : undefined,
-      salary_max: form.salary_max ? Number(form.salary_max) : undefined,
-      is_active: true,
-      source: "manuale",
-    };
-    mutation.mutate(data);
+    setLoading(true);
+
+    const body = `
+Nuova richiesta di pubblicazione offerta di lavoro da Click2Job.
+
+--- DATI DI CONTATTO ---
+Nome: ${form.contact_name}
+Email: ${form.contact_email}
+Telefono: ${form.contact_phone || "Non fornito"}
+
+--- DETTAGLI OFFERTA ---
+Azienda: ${form.company}
+Posizione: ${form.title}
+Sede: ${form.location || "Non specificata"}
+Tipo contratto: ${form.contract_type || "Non specificato"}
+
+Descrizione offerta:
+${form.description}
+
+Note aggiuntive:
+${form.notes || "Nessuna"}
+    `.trim();
+
+    await base44.integrations.Core.SendEmail({
+      to: ADMIN_EMAIL,
+      subject: `[Click2Job] Richiesta pubblicazione: ${form.title} - ${form.company}`,
+      body,
+    });
+
+    setLoading(false);
+    setSubmitted(true);
   };
 
   if (submitted) {
     return (
-      <div className="max-w-xl mx-auto px-4 py-20 text-center">
-        <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="w-8 h-8 text-emerald-600" />
+      <div className="max-w-xl mx-auto px-4 py-24 text-center">
+        <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ backgroundColor: "#e8f5ec" }}>
+          <CheckCircle className="w-10 h-10" style={{ color: "#5aac6b" }} />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">Offerta Pubblicata!</h1>
-        <p className="text-gray-500 mb-8">La tua offerta di lavoro è stata pubblicata con successo e sarà visibile ai candidati.</p>
-        <Button onClick={() => setSubmitted(false)} className="bg-emerald-600 hover:bg-emerald-700">
-          Pubblica un'altra offerta
+        <h1 className="text-2xl font-bold text-gray-900 mb-3">Richiesta inviata!</h1>
+        <p className="text-gray-500 mb-2">
+          Abbiamo ricevuto la tua richiesta. Il nostro team ti contatterà entro 24 ore per completare la pubblicazione dell'offerta.
+        </p>
+        <p className="text-gray-400 text-sm mb-8">Controlla la tua casella email: <strong>{form.contact_email}</strong></p>
+        <Button onClick={() => { setSubmitted(false); setForm({ contact_name: "", contact_email: "", contact_phone: "", company: "", location: "", title: "", contract_type: "", description: "", notes: "" }); }}
+          className="text-white font-semibold" style={{ backgroundColor: "#5aac6b" }}>
+          Invia un'altra richiesta
         </Button>
       </div>
     );
@@ -66,20 +82,20 @@ export default function PubblicaOfferta() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Hero */}
       <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-8 md:p-12 mb-10 text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 rounded-full blur-[120px] opacity-20" />
+        <div className="absolute top-0 right-0 w-64 h-64 rounded-full blur-[120px] opacity-20" style={{ backgroundColor: "#5aac6b" }} />
         <div className="relative">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-xs font-medium mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-4 border" style={{ backgroundColor: "rgba(90,172,107,0.1)", borderColor: "rgba(90,172,107,0.25)", color: "#7dd491" }}>
             <Building2 className="w-3.5 h-3.5" />
             Per le Aziende
           </div>
-          <h1 className="text-3xl md:text-4xl font-extrabold">Pubblica la tua Offerta di Lavoro</h1>
+          <h1 className="text-3xl md:text-4xl font-extrabold">Posta un'offerta di lavoro</h1>
           <p className="text-gray-400 mt-3 max-w-lg">
-            Raggiungi migliaia di candidati qualificati in tutta Italia. Pubblica la tua offerta in pochi minuti.
+            Vuoi trovare il candidato giusto? Compila il form: il nostro team pubblicherà la tua offerta su Click2Job e ti contatterà per i dettagli.
           </p>
           <div className="flex flex-wrap items-center gap-6 mt-6 text-sm text-gray-400">
-            <span className="flex items-center gap-2"><Zap className="w-4 h-4 text-emerald-400" />Pubblicazione immediata</span>
-            <span className="flex items-center gap-2"><Users className="w-4 h-4 text-emerald-400" />Candidati qualificati</span>
-            <span className="flex items-center gap-2"><Shield className="w-4 h-4 text-emerald-400" />Gestione semplice</span>
+            <span className="flex items-center gap-2"><Zap className="w-4 h-4" style={{ color: "#7dd491" }} />Risposta entro 24h</span>
+            <span className="flex items-center gap-2"><Users className="w-4 h-4" style={{ color: "#7dd491" }} />Candidati qualificati</span>
+            <span className="flex items-center gap-2"><Shield className="w-4 h-4" style={{ color: "#7dd491" }} />Nessun obbligo</span>
           </div>
         </div>
       </div>
@@ -87,84 +103,87 @@ export default function PubblicaOfferta() {
       {/* Form */}
       <div className="max-w-3xl mx-auto">
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-100 p-6 md:p-8 space-y-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Dettagli dell'Offerta</h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label>Titolo Posizione *</Label>
-              <Input value={form.title} onChange={(e) => setForm({...form, title: e.target.value})} placeholder="Es. Programmatore Java Senior" required />
-            </div>
-            <div>
-              <Label>Azienda *</Label>
-              <Input value={form.company} onChange={(e) => setForm({...form, company: e.target.value})} placeholder="Nome azienda" required />
-            </div>
-            <div>
-              <Label>Località</Label>
-              <Input value={form.location} onChange={(e) => setForm({...form, location: e.target.value})} placeholder="Es. Milano" />
-            </div>
-            <div>
-              <Label>Categoria</Label>
-              <Input value={form.category} onChange={(e) => setForm({...form, category: e.target.value})} placeholder="Es. Informatica" />
-            </div>
-            <div>
-              <Label>Tipo Contratto</Label>
-              <Select value={form.contract_type} onValueChange={(v) => setForm({...form, contract_type: v})}>
-                <SelectTrigger><SelectValue placeholder="Seleziona" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="tempo_indeterminato">Tempo Indeterminato</SelectItem>
-                  <SelectItem value="tempo_determinato">Tempo Determinato</SelectItem>
-                  <SelectItem value="apprendistato">Apprendistato</SelectItem>
-                  <SelectItem value="stage">Stage/Tirocinio</SelectItem>
-                  <SelectItem value="partita_iva">Partita IVA</SelectItem>
-                  <SelectItem value="collaborazione">Collaborazione</SelectItem>
-                  <SelectItem value="somministrazione">Somministrazione</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Orario</Label>
-              <Select value={form.work_schedule} onValueChange={(v) => setForm({...form, work_schedule: v})}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full_time">Full-time</SelectItem>
-                  <SelectItem value="part_time">Part-time</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>RAL Minima (€/anno)</Label>
-              <Input type="number" value={form.salary_min} onChange={(e) => setForm({...form, salary_min: e.target.value})} placeholder="Es. 25000" />
-            </div>
-            <div>
-              <Label>RAL Massima (€/anno)</Label>
-              <Input type="number" value={form.salary_max} onChange={(e) => setForm({...form, salary_max: e.target.value})} placeholder="Es. 35000" />
+          {/* Contatto */}
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <Mail className="w-5 h-5" style={{ color: "#5aac6b" }} />
+              I tuoi dati di contatto
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label>Nome e Cognome *</Label>
+                <Input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} placeholder="Mario Rossi" required />
+              </div>
+              <div>
+                <Label>Email *</Label>
+                <Input type="email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} placeholder="mario@azienda.it" required />
+              </div>
+              <div className="md:col-span-2">
+                <Label>Telefono</Label>
+                <Input value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} placeholder="+39 02 1234567" />
+              </div>
             </div>
           </div>
 
+          <hr className="border-gray-100" />
+
+          {/* Offerta */}
           <div>
-            <Label>Descrizione</Label>
-            <Textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} placeholder="Descrivi la posizione..." rows={5} />
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <Building2 className="w-5 h-5" style={{ color: "#5aac6b" }} />
+              Dettagli dell'offerta
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label>Azienda *</Label>
+                <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="Nome azienda" required />
+              </div>
+              <div>
+                <Label>Posizione ricercata *</Label>
+                <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Es. Programmatore Java Senior" required />
+              </div>
+              <div>
+                <Label>Sede di lavoro</Label>
+                <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Es. Milano" />
+              </div>
+              <div>
+                <Label>Tipo di contratto</Label>
+                <Select value={form.contract_type} onValueChange={(v) => setForm({ ...form, contract_type: v })}>
+                  <SelectTrigger><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Tempo Indeterminato">Tempo Indeterminato</SelectItem>
+                    <SelectItem value="Tempo Determinato">Tempo Determinato</SelectItem>
+                    <SelectItem value="Apprendistato">Apprendistato</SelectItem>
+                    <SelectItem value="Stage/Tirocinio">Stage/Tirocinio</SelectItem>
+                    <SelectItem value="Partita IVA">Partita IVA</SelectItem>
+                    <SelectItem value="Collaborazione">Collaborazione</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2">
+                <Label>Descrizione dell'offerta *</Label>
+                <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descrivi il ruolo, i requisiti e cosa offrite..." rows={6} required />
+              </div>
+              <div className="md:col-span-2">
+                <Label>Note aggiuntive</Label>
+                <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Informazioni extra, budget disponibile, tempistiche..." rows={3} />
+              </div>
+            </div>
           </div>
-          <div>
-            <Label>Requisiti</Label>
-            <Textarea value={form.requirements} onChange={(e) => setForm({...form, requirements: e.target.value})} placeholder="Requisiti richiesti..." rows={3} />
-          </div>
-          <div>
-            <Label>Benefit</Label>
-            <Textarea value={form.benefits} onChange={(e) => setForm({...form, benefits: e.target.value})} placeholder="Benefit offerti..." rows={3} />
-          </div>
-          <div>
-            <Label>URL per Candidarsi</Label>
-            <Input value={form.apply_url} onChange={(e) => setForm({...form, apply_url: e.target.value})} placeholder="https://..." />
-          </div>
+
+          <p className="text-xs text-gray-400">
+            Inviando questa richiesta, il nostro team ti contatterà entro 24 ore per concordare i dettagli e la pubblicazione dell'offerta.
+          </p>
 
           <Button
             type="submit"
-            disabled={mutation.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700 w-full py-6 h-auto text-base font-semibold"
+            disabled={loading}
+            className="w-full py-6 h-auto text-base font-semibold text-white"
+            style={{ backgroundColor: "#5aac6b" }}
           >
-            {mutation.isPending ? "Pubblicazione in corso..." : "Pubblica Offerta"}
-            <ArrowRight className="w-5 h-5 ml-2" />
+            {loading ? "Invio in corso..." : "Invia richiesta di pubblicazione"}
+            {!loading && <ArrowRight className="w-5 h-5 ml-2" />}
           </Button>
         </form>
       </div>
