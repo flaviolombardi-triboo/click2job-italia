@@ -4,42 +4,46 @@ Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
 
-    // Allow both scheduled (no auth) and manual (admin) invocations
-    let isScheduled = false;
+    // Read body FIRST before anything else
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const targetFeedId = body.feed_id || null;
+
+    // Auth check
     try {
       const user = await base44.auth.me();
       if (user?.role !== 'admin') {
         return Response.json({ error: 'Forbidden' }, { status: 403 });
       }
     } catch (_) {
-      // No user = called from scheduler, allow via service role
-      isScheduled = true;
+      // No user = called from scheduler, allowed
     }
 
     const client = base44.asServiceRole;
 
-    // Get all active feeds
+    // Get feeds
     const feeds = await client.entities.XMLFeed.filter({ status: 'active' });
 
     if (!feeds || feeds.length === 0) {
       return Response.json({ message: 'No active feeds found', imported: 0 });
     }
 
-    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
-    const targetFeedId = body.feed_id || null;
-
     const feedsToProcess = targetFeedId
       ? feeds.filter((f) => f.id === targetFeedId)
       : feeds;
+
+    if (feedsToProcess.length === 0) {
+      return Response.json({ message: 'Feed not found', imported: 0 });
+    }
 
     let totalImported = 0;
     const results = [];
 
     for (const feed of feedsToProcess) {
       try {
-        // Fetch feed content
+        // Fetch feed XML
         const fetchRes = await fetch(feed.url, {
           headers: { 'User-Agent': 'Click2Job-Bot/1.0' },
+          signal: AbortSignal.timeout(15000),
         });
 
         if (!fetchRes.ok) {
@@ -48,7 +52,6 @@ Deno.serve(async (req) => {
 
         let xmlText = '';
 
-        // Handle .gz compressed feeds
         const contentType = fetchRes.headers.get('content-type') || '';
         const isGzip =
           contentType.includes('gzip') ||
@@ -77,31 +80,30 @@ Deno.serve(async (req) => {
           xmlText = await fetchRes.text();
         }
 
-        // Truncate to avoid token limits (take first 20000 chars)
-        const xmlSample = xmlText.substring(0, 20000);
+        // Use only first 12000 chars to reduce LLM token/memory usage
+        const xmlSample = xmlText.substring(0, 12000);
+        xmlText = null; // free memory
 
-        // Use LLM to parse the XML universally
+        // Use LLM to parse
         const llmResult = await client.integrations.Core.InvokeLLM({
-          prompt: `Sei un parser di feed XML per offerte di lavoro. Analizza il seguente XML e estrai TUTTI gli annunci di lavoro presenti.
+          prompt: `Sei un parser di feed XML per offerte di lavoro. Analizza il seguente XML e estrai tutti gli annunci di lavoro presenti (max 30 annunci).
 
-Per ogni annuncio estrai i seguenti campi (se disponibili):
-- title: titolo della posizione (stringa, obbligatorio)
-- company: nome azienda (stringa)
-- location: città/sede (stringa)
-- region: regione italiana (stringa)
-- category: categoria/settore (stringa)
-- description: descrizione completa del ruolo (stringa)
-- requirements: requisiti richiesti (stringa)
-- benefits: benefit offerti (stringa)
-- apply_url: URL per candidarsi (stringa)
-- external_id: ID univoco dell'annuncio nel feed (stringa)
-- contract_type: tipo contratto, SOLO uno di questi valori esatti: tempo_indeterminato, tempo_determinato, apprendistato, stage, partita_iva, collaborazione, somministrazione (se non mappabile, ometti)
-- work_schedule: SOLO full_time oppure part_time (se non mappabile, ometti)
-- salary_min: stipendio minimo annuo lordo in euro (numero intero, ometti se non presente)
-- salary_max: stipendio massimo annuo lordo in euro (numero intero, ometti se non presente)
-- expiry_date: data scadenza in formato YYYY-MM-DD (stringa, ometti se non presente)
+Per ogni annuncio estrai (se disponibili):
+- title: titolo posizione (obbligatorio)
+- company: nome azienda
+- location: città/sede
+- region: regione italiana
+- category: categoria/settore
+- description: descrizione (max 500 caratteri)
+- requirements: requisiti (max 300 caratteri)
+- apply_url: URL candidatura
+- external_id: ID univoco nel feed
+- contract_type: SOLO uno tra: tempo_indeterminato, tempo_determinato, apprendistato, stage, partita_iva, collaborazione, somministrazione
+- work_schedule: SOLO full_time oppure part_time
+- salary_min: numero intero
+- salary_max: numero intero
 
-Feed XML da analizzare:
+XML:
 ${xmlSample}`,
           response_json_schema: {
             type: 'object',
@@ -118,14 +120,12 @@ ${xmlSample}`,
                     category: { type: 'string' },
                     description: { type: 'string' },
                     requirements: { type: 'string' },
-                    benefits: { type: 'string' },
                     apply_url: { type: 'string' },
                     external_id: { type: 'string' },
                     contract_type: { type: 'string' },
                     work_schedule: { type: 'string' },
                     salary_min: { type: 'number' },
                     salary_max: { type: 'number' },
-                    expiry_date: { type: 'string' },
                   },
                   required: ['title'],
                 },
@@ -142,7 +142,7 @@ ${xmlSample}`,
           continue;
         }
 
-        // Get existing external_ids for this feed to avoid duplicates
+        // Deduplicate
         const existingJobs = await client.entities.JobOffer.filter({ source: feed.name });
         const existingIds = new Set(existingJobs.map((j) => j.external_id).filter(Boolean));
 
