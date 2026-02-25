@@ -181,11 +181,34 @@ Deno.serve(async (req) => {
           await Promise.all(oldChunks.map((c) => client.entities.FeedChunk.delete(c.id)));
         }
 
-        const fetchRes = await fetch(feed.url, {
-          headers: { 'User-Agent': 'Click2Job-Bot/1.0', 'Accept-Encoding': 'gzip, deflate' },
-          signal: AbortSignal.timeout(90000),
-        });
-        if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
+        // Retry logic with exponential backoff
+        let fetchRes;
+        let attempt = 0;
+        const MAX_RETRIES = 5;
+        while (attempt < MAX_RETRIES) {
+          try {
+            fetchRes = await fetch(feed.url, {
+              headers: { 'User-Agent': 'Click2Job-Bot/1.0', 'Accept-Encoding': 'gzip, deflate' },
+              signal: AbortSignal.timeout(90000),
+            });
+            
+            if (fetchRes.status === 429) {
+              // Rate limit - wait and retry
+              const waitTime = Math.min(1000 * Math.pow(2, attempt), 60000); // max 60s
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              attempt++;
+              continue;
+            }
+            
+            if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
+            break; // Success
+          } catch (err) {
+            if (attempt === MAX_RETRIES - 1) throw err;
+            const waitTime = Math.min(1000 * Math.pow(2, attempt), 60000);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            attempt++;
+          }
+        }
 
         const contentType = fetchRes.headers.get('content-type') || '';
         const contentEncoding = fetchRes.headers.get('content-encoding') || '';
