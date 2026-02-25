@@ -282,12 +282,13 @@ Deno.serve(async (req) => {
 
     const client = base44.asServiceRole;
 
-    const pendingChunks = await client.entities.FeedChunk.list();
+    const pendingChunksRaw = await client.entities.FeedChunk.list();
+    console.log('pendingChunksRaw type:', typeof pendingChunksRaw, Array.isArray(pendingChunksRaw));
+    console.log('pendingChunksRaw sample:', JSON.stringify(String(pendingChunksRaw).substring(0, 500)));
+    const pendingChunks = Array.isArray(pendingChunksRaw) ? pendingChunksRaw : [];
     const toProcess = pendingChunks.filter(c => c.status === 'pending').slice(0, 15);
 
-    if (toProcess.length === 0) return Response.json({ message: 'No pending chunks', processed: 0 });
-    
-    console.log('Sample chunk:', JSON.stringify(toProcess[0]));
+    if (toProcess.length === 0) return Response.json({ message: 'No pending chunks', processed: 0, debug: { type: typeof pendingChunksRaw, isArray: Array.isArray(pendingChunksRaw), length: pendingChunks.length } });
 
     // Group chunks by feed_id
     const byFeed = {};
