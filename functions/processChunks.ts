@@ -355,11 +355,14 @@ Deno.serve(async (req) => {
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);
     let totalImported = 0;
     let totalSkipped = 0;
+    let totalNullTitle = 0;
 
     await Promise.all(
       feedResults.map(async (agg) => {
         totalImported += agg.imported;
         totalSkipped += agg.skipped;
+        totalNullTitle += agg.nullTitle || 0;
+        console.log(`[SUMMARY] ${agg.feedName}: imported=${agg.imported}, skipped=${agg.skipped}, no_title=${agg.nullTitle || 0}, error=${agg.hasError}`);
         if (agg.imported > 0 || agg.hasError) {
           await client.entities.ImportLog.create({
             feed_id: agg.feedId,
@@ -375,12 +378,14 @@ Deno.serve(async (req) => {
     );
 
     const remaining = await client.entities.FeedChunk.filter({ status: 'pending' });
+    console.log(`[GLOBAL] processed=${toProcess.length}, imported=${totalImported}, skipped=${totalSkipped}, no_title=${totalNullTitle}, remaining=${remaining.length}, duration=${durationSeconds}s`);
 
     return Response.json({
       success: true,
       processed: toProcess.length,
       total_imported: totalImported,
       total_skipped: totalSkipped,
+      total_null_title: totalNullTitle,
       remaining_chunks: remaining.length,
       feeds_processed: feedIds.length,
       duration_seconds: durationSeconds,
