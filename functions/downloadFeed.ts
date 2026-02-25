@@ -161,8 +161,8 @@ Deno.serve(async (req) => {
 
     try {
       const user = await base44.auth.me();
-      if (user?.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
-    } catch (_) { /* scheduler */ }
+      if (user && user.role !== 'admin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+    } catch (_) { /* no user = scheduler call, allow through */ }
 
     const client = base44.asServiceRole;
     const feeds = await client.entities.XMLFeed.filter({ status: 'active' });
