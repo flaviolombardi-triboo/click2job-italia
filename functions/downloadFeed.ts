@@ -173,8 +173,9 @@ Deno.serve(async (req) => {
 
     for (const feed of feedsToProcess) {
       try {
-        // Delete old pending chunks for this feed (parallel fire-and-forget)
-        const oldChunks = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' });
+        // Delete old pending chunks for this feed
+        const oldChunksRaw = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' }, 'created_date', 500);
+        const oldChunks = Array.isArray(oldChunksRaw) ? oldChunksRaw : [];
         if (oldChunks.length > 0) {
           await Promise.all(oldChunks.map((c) => client.entities.FeedChunk.delete(c.id)));
         }
