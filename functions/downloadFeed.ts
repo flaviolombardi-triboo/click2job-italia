@@ -181,33 +181,51 @@ Deno.serve(async (req) => {
           await Promise.all(oldChunks.map((c) => client.entities.FeedChunk.delete(c.id)));
         }
 
-        // Retry logic with exponential backoff
+        // Fetch con retry automatico su rate limit (429 o testo nel body)
         let fetchRes;
         let attempt = 0;
         const MAX_RETRIES = 5;
+        let isRateLimit = false;
+
         while (attempt < MAX_RETRIES) {
-          try {
-            fetchRes = await fetch(feed.url, {
-              headers: { 'User-Agent': 'Click2Job-Bot/1.0', 'Accept-Encoding': 'gzip, deflate' },
-              signal: AbortSignal.timeout(90000),
-            });
-            
-            if (fetchRes.status === 429) {
-              // Rate limit - wait and retry
-              const waitTime = Math.min(1000 * Math.pow(2, attempt), 60000); // max 60s
-              await new Promise(resolve => setTimeout(resolve, waitTime));
-              attempt++;
-              continue;
+          isRateLimit = false;
+          fetchRes = await fetch(feed.url, {
+            headers: { 'User-Agent': 'Click2Job-Bot/1.0', 'Accept-Encoding': 'gzip, deflate' },
+            signal: AbortSignal.timeout(90000),
+          });
+
+          // Rileva rate limit da status HTTP
+          if (fetchRes.status === 429 || fetchRes.status === 503) {
+            isRateLimit = true;
+          }
+
+          // Rileva rate limit da body testuale (alcuni server restituiscono 200 con testo di errore)
+          if (!isRateLimit && fetchRes.ok) {
+            const contentType = fetchRes.headers.get('content-type') || '';
+            if (!contentType.includes('xml') && !contentType.includes('gzip') && !feed.url.endsWith('.gz')) {
+              const bodyText = await fetchRes.clone().text();
+              if (/rate.?limit|too many requests|throttl/i.test(bodyText)) {
+                isRateLimit = true;
+              }
             }
-            
-            if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
-            break; // Success
-          } catch (err) {
-            if (attempt === MAX_RETRIES - 1) throw err;
-            const waitTime = Math.min(1000 * Math.pow(2, attempt), 60000);
+          }
+
+          if (isRateLimit) {
+            const waitTime = Math.min(5000 * Math.pow(2, attempt), 120000); // 5s, 10s, 20s, 40s, 120s
             await new Promise(resolve => setTimeout(resolve, waitTime));
             attempt++;
+            continue;
           }
+
+          if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
+          break; // Successo
+        }
+
+        // Se dopo tutti i retry siamo ancora in rate limit, non segnare come error:
+        // il feed rimane 'active' e la prossima esecuzione automatica riproverà
+        if (isRateLimit) {
+          results.push({ feed: feed.name, skipped: 'rate_limit', message: 'Rate limit persistente, verrà riprovato al prossimo ciclo' });
+          continue;
         }
 
         const contentType = fetchRes.headers.get('content-type') || '';
