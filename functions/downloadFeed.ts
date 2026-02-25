@@ -165,8 +165,9 @@ Deno.serve(async (req) => {
     } catch (_) { /* no user = scheduler call, allow through */ }
 
     const client = base44.asServiceRole;
-    const feeds = await client.entities.XMLFeed.filter({ status: 'active' });
-    if (!feeds || feeds.length === 0) return Response.json({ message: 'No active feeds', feeds_processed: 0 });
+    const feedsRaw = await client.entities.XMLFeed.filter({ status: 'active' }, 'created_date', 50);
+    const feeds = Array.isArray(feedsRaw) ? feedsRaw : [];
+    if (feeds.length === 0) return Response.json({ message: 'No active feeds', feeds_processed: 0 });
 
     const feedsToProcess = targetFeedId ? feeds.filter((f) => f.id === targetFeedId) : feeds;
     const results = [];
