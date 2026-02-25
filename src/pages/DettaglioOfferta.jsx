@@ -20,7 +20,8 @@ const CONTRACT_LABELS = {
 };
 
 export default function DettaglioOfferta() {
-  const urlParams = new URLSearchParams(window.location.search);
+  const location = useLocation();
+  const urlParams = new URLSearchParams(location.search);
   const jobId = urlParams.get("id");
 
   const { data: job, isLoading } = useQuery({
