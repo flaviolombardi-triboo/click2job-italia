@@ -90,8 +90,8 @@ function parseJobXml(jobXml, openTagFull) {
 
     if (!val) continue;
 
-    // Truncate only extremely long fields (non description)
-    if (LONG_FIELDS.has(field) && field !== 'description' && val.length > 4000) val = val.substring(0, 4000);
+    // Truncate long fields at parse time to keep chunk sizes manageable
+    if (LONG_FIELDS.has(field)) val = val.substring(0, 5000);
 
     // First-value wins
     if (!job[field]) job[field] = val;
@@ -190,7 +190,7 @@ Deno.serve(async (req) => {
         const isGzip = contentType.includes('gzip') || feed.url.endsWith('.gz') || contentEncoding === 'gzip';
         const jobTag = (feed.job_tag || 'job').trim();
 
-        const CHUNK_SIZE = 50;      // 50 job per chunk → meno API calls
+        const CHUNK_SIZE = 10;      // 10 job per chunk → evita il limite di dimensione campo
         const MAX_JOBS = 5000;      // fino a 5000 job per feed per run
         let currentChunk = [];
         let chunkIndex = 0;
