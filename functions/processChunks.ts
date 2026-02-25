@@ -283,9 +283,12 @@ Deno.serve(async (req) => {
     const client = base44.asServiceRole;
 
     const pendingChunks = await client.entities.FeedChunk.filter({ status: 'pending' });
-    const toProcess = pendingChunks.slice(0, 15); // 15 chunk per run (era 5)
+    const toProcess = pendingChunks.filter(c => c.id).slice(0, 15);
 
     if (toProcess.length === 0) return Response.json({ message: 'No pending chunks', processed: 0 });
+    
+    console.log('Sample chunk keys:', JSON.stringify(Object.keys(toProcess[0])));
+    console.log('Sample chunk id:', toProcess[0].id, 'feed_id:', toProcess[0].feed_id);
 
     // Group chunks by feed_id
     const byFeed = {};
