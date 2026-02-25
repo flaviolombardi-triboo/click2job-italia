@@ -297,7 +297,7 @@ Deno.serve(async (req) => {
     // Load all needed feed configs in one parallel batch
     const feedIds = Object.keys(byFeed);
     const feedConfigs = await Promise.all(
-      feedIds.map(id => client.entities.XMLFeed.filter({ id }).then(r => r?.[0] || null))
+      feedIds.map(id => client.entities.XMLFeed.get(id).catch(() => null))
     );
     const feedConfigMap = {};
     feedIds.forEach((id, i) => { feedConfigMap[id] = feedConfigs[i]; });
