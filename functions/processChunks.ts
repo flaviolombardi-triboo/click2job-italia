@@ -294,10 +294,10 @@ Deno.serve(async (req) => {
       byFeed[chunk.feed_id].push(chunk);
     }
 
-    // Load all needed feed configs - get all active feeds once
+    // Load all needed feed configs
     const feedIds = Object.keys(byFeed);
-    const allFeeds = await client.entities.XMLFeed.list();
-    const feedConfigs = feedIds.map(id => allFeeds.find(f => f.id === id) || null);
+    const allFeeds = await client.entities.XMLFeed.filter({});
+    const feedConfigs = feedIds.map(id => (Array.isArray(allFeeds) ? allFeeds : []).find(f => f.id === id) || null);
     const feedConfigMap = {};
     feedIds.forEach((id, i) => { feedConfigMap[id] = feedConfigs[i]; });
 
