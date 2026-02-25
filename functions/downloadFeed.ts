@@ -174,11 +174,11 @@ Deno.serve(async (req) => {
 
     for (const feed of feedsToProcess) {
       try {
-        // Delete old pending chunks for this feed
+        // Delete old pending chunks for this feed (one by one to avoid SDK rate limits)
         const oldChunksRaw = await client.entities.FeedChunk.filter({ feed_id: feed.id, status: 'pending' }, 'created_date', 500);
         const oldChunks = Array.isArray(oldChunksRaw) ? oldChunksRaw : [];
-        if (oldChunks.length > 0) {
-          await Promise.all(oldChunks.map((c) => client.entities.FeedChunk.delete(c.id)));
+        for (const c of oldChunks) {
+          await client.entities.FeedChunk.delete(c.id);
         }
 
         // Fetch con retry automatico su rate limit (429 o testo nel body)
