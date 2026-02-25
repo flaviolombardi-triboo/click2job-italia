@@ -201,50 +201,49 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Fetch con retry automatico su rate limit
-        let fetchRes;
+        // Fetch con retry automatico su rate limit (sia HTTP 429 che errori SDK con testo rate limit)
+        let fetchRes = null;
         let rateLimitSkip = false;
 
-        const MAX_RETRIES = 3;
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const MAX_FETCH_RETRIES = 3;
+        for (let attempt = 0; attempt < MAX_FETCH_RETRIES; attempt++) {
           try {
-            fetchRes = await fetch(feed.url, {
+            const res = await fetch(feed.url, {
               headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Click2Job-Bot/1.0)', 'Accept': 'application/xml,text/xml,*/*' },
               signal: AbortSignal.timeout(90000),
             });
-          } catch (fetchErr) {
-            // Eccezione lanciata dal fetch stesso (es. errore di rete o rate limit rilevato a basso livello)
-            const msg = fetchErr.message || '';
-            if (/rate.?limit|too many|throttl|429/i.test(msg)) {
-              if (attempt < MAX_RETRIES - 1) {
+
+            if (res.status === 429 || res.status === 503) {
+              console.log(`[${feed.name}] HTTP ${res.status} — attendo ${10 * (attempt + 1)}s (tentativo ${attempt + 1}/${MAX_FETCH_RETRIES})`);
+              if (attempt < MAX_FETCH_RETRIES - 1) {
                 await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
                 continue;
               }
-              // Rate limit persistente: lascia il feed active, riproverà al prossimo ciclo
               rateLimitSkip = true;
               break;
             }
-            throw fetchErr; // altro errore di rete → propaga
-          }
 
-          // Rate limit da status HTTP
-          if (fetchRes.status === 429 || fetchRes.status === 503) {
-            if (attempt < MAX_RETRIES - 1) {
-              await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
-              fetchRes = null;
-              continue;
-            }
-            rateLimitSkip = true;
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            fetchRes = res;
             break;
+          } catch (fetchErr) {
+            const msg = String(fetchErr.message || '');
+            const isRl = /rate.?limit|too many|throttl|429/i.test(msg);
+            console.log(`[${feed.name}] Fetch error (tentativo ${attempt + 1}): ${msg} isRateLimit=${isRl}`);
+            if (isRl || attempt < MAX_FETCH_RETRIES - 1) {
+              if (attempt < MAX_FETCH_RETRIES - 1) {
+                await new Promise(r => setTimeout(r, 10000 * (attempt + 1)));
+                continue;
+              }
+              if (isRl) { rateLimitSkip = true; break; }
+            }
+            throw fetchErr;
           }
-
-          if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${fetchRes.statusText}`);
-          break; // Successo
         }
 
-        // Rate limit persistente: il feed rimane 'active', il prossimo ciclo riproverà
+        // Rate limit persistente dopo tutti i retry: il feed rimane 'active', il prossimo ciclo riproverà
         if (rateLimitSkip || !fetchRes) {
-          console.log(`[${feed.name}] Rate limit persistente — feed lasciato active, verrà riprovato`);
+          console.log(`[${feed.name}] Rate limit persistente — feed lasciato active, verrà riprovato al prossimo ciclo`);
           results.push({ feed: feed.name, skipped: 'rate_limit', message: 'Rate limit persistente, verrà riprovato al prossimo ciclo' });
           continue;
         }
