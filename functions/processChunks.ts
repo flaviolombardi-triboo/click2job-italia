@@ -204,44 +204,76 @@ function buildJobRecord(rawJob, mappingRules, feedName, feedId) {
 async function processFeedChunks(chunks, feedConfig, client) {
   const feedId = chunks[0].feed_id;
   const feedName = chunks[0].feed_name;
+  const log = (...args) => console.log(`[${feedName}]`, ...args);
+  const logErr = (...args) => console.error(`[${feedName}]`, ...args);
+
+  log(`START — ${chunks.length} chunk(s), chunk_indexes: [${chunks.map(c => c.chunk_index).join(', ')}]`);
+
   const mappingRules = (() => {
     try { return feedConfig?.field_mapping ? JSON.parse(feedConfig.field_mapping) : []; }
-    catch (_) { return []; }
+    catch (e) { logErr('field_mapping JSON parse error:', e.message); return []; }
   })();
+  log(`Field mapping rules: ${mappingRules.length}`);
 
   // Mark all chunks as processing in parallel
   await Promise.all(chunks.map(c => client.entities.FeedChunk.update(c.id, { status: 'processing' })));
 
   // Load existing external_ids ONCE for the entire feed (big performance win)
+  const t0 = Date.now();
   const existingJobs = await client.entities.JobOffer.filter({ source: feedName });
   const existingIds = new Set(existingJobs.map((j) => j.external_id).filter(Boolean));
+  log(`Dedup index loaded: ${existingIds.size} existing IDs in ${Date.now() - t0}ms`);
 
   let imported = 0;
   let skipped = 0;
+  let nullTitle = 0;
   let hasError = false;
   const chunkUpdates = [];
-
-  // Build all jobs across all chunks first, then bulk-create once
   const allJobsToCreate = [];
 
   for (const chunk of chunks) {
+    const chunkTag = `chunk[${chunk.chunk_index}]`;
     try {
-      const jobs = JSON.parse(chunk.xml_content);
+      let jobs;
+      try {
+        jobs = JSON.parse(chunk.xml_content);
+      } catch (parseErr) {
+        logErr(`${chunkTag} JSON.parse FAILED: ${parseErr.message} — first 200 chars: ${String(chunk.xml_content).substring(0, 200)}`);
+        chunkUpdates.push({ id: chunk.id, status: 'error', error_message: `JSON parse: ${parseErr.message}` });
+        hasError = true;
+        continue;
+      }
+
+      log(`${chunkTag} parsed OK — ${jobs.length} raw job(s)`);
       const chunkJobs = [];
 
-      for (const rawJob of jobs) {
-        const result = buildJobRecord(rawJob, mappingRules, feedName, feedId);
-        if (!result) continue;
+      for (let i = 0; i < jobs.length; i++) {
+        const rawJob = jobs[i];
+        let result;
+        try {
+          result = buildJobRecord(rawJob, mappingRules, feedName, feedId);
+        } catch (buildErr) {
+          logErr(`${chunkTag} job[${i}] buildJobRecord THREW: ${buildErr.message}`, JSON.stringify(rawJob).substring(0, 200));
+          continue;
+        }
+        if (!result) {
+          nullTitle++;
+          const keys = Object.keys(rawJob).join(',');
+          if (nullTitle <= 3) log(`${chunkTag} job[${i}] SKIPPED (no title) — raw keys: ${keys}`);
+          continue;
+        }
         const { record, extId } = result;
         if (extId && existingIds.has(extId)) { skipped++; continue; }
-        if (extId) existingIds.add(extId); // prevent intra-batch duplicates
+        if (extId) existingIds.add(extId);
         chunkJobs.push(record);
       }
 
+      log(`${chunkTag} → to create: ${chunkJobs.length}, skipped(dup): ${skipped}, no-title: ${nullTitle}`);
       allJobsToCreate.push(...chunkJobs);
       chunkUpdates.push({ id: chunk.id, status: 'done', jobs_imported: chunkJobs.length });
       imported += chunkJobs.length;
     } catch (err) {
+      logErr(`${chunkTag} UNEXPECTED ERROR: ${err.message}\n${err.stack}`);
       chunkUpdates.push({ id: chunk.id, status: 'error', error_message: err.message });
       hasError = true;
     }
@@ -249,7 +281,19 @@ async function processFeedChunks(chunks, feedConfig, client) {
 
   // Single bulkCreate for ALL jobs across ALL chunks of this feed
   if (allJobsToCreate.length > 0) {
-    await client.entities.JobOffer.bulkCreate(allJobsToCreate);
+    const t1 = Date.now();
+    try {
+      await client.entities.JobOffer.bulkCreate(allJobsToCreate);
+      log(`bulkCreate OK — ${allJobsToCreate.length} jobs in ${Date.now() - t1}ms`);
+    } catch (bulkErr) {
+      logErr(`bulkCreate FAILED: ${bulkErr.message}`);
+      // Mark all done chunks as error
+      for (const u of chunkUpdates) { if (u.status === 'done') { u.status = 'error'; u.error_message = `bulkCreate: ${bulkErr.message}`; } }
+      imported = 0;
+      hasError = true;
+    }
+  } else {
+    log(`No new jobs to create (all skipped or no-title)`);
   }
 
   // Update feed total and chunk statuses in parallel
@@ -262,10 +306,11 @@ async function processFeedChunks(chunks, feedConfig, client) {
           status: 'active',
         })
       : Promise.resolve(),
-    ...chunkUpdates.map(u => client.entities.FeedChunk.update(u.id, { status: u.status, jobs_imported: u.jobs_imported, error_message: u.error_message })),
+    ...chunkUpdates.map(u => client.entities.FeedChunk.update(u.id, { status: u.status, jobs_imported: u.jobs_imported || 0, error_message: u.error_message })),
   ]);
 
-  return { feedId, feedName, imported, skipped, chunks: chunks.length, hasError };
+  log(`DONE — imported: ${imported}, skipped: ${skipped}, no-title: ${nullTitle}, errors: ${hasError}`);
+  return { feedId, feedName, imported, skipped, nullTitle, chunks: chunks.length, hasError };
 }
 
 // ─── HTTP handler ─────────────────────────────────────────────────────────────
