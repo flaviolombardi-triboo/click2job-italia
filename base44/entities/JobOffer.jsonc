@@ -1,0 +1,95 @@
+{
+  "name": "JobOffer",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Titolo dell'offerta di lavoro"
+    },
+    "company": {
+      "type": "string",
+      "description": "Nome dell'azienda"
+    },
+    "location": {
+      "type": "string",
+      "description": "Citt\u00e0/Luogo di lavoro"
+    },
+    "region": {
+      "type": "string",
+      "description": "Regione italiana"
+    },
+    "category": {
+      "type": "string",
+      "description": "Categoria lavorativa"
+    },
+    "contract_type": {
+      "type": "string",
+      "enum": [
+        "tempo_indeterminato",
+        "tempo_determinato",
+        "apprendistato",
+        "stage",
+        "partita_iva",
+        "collaborazione",
+        "somministrazione"
+      ],
+      "description": "Tipo di contratto"
+    },
+    "work_schedule": {
+      "type": "string",
+      "enum": [
+        "full_time",
+        "part_time"
+      ],
+      "default": "full_time"
+    },
+    "salary_min": {
+      "type": "number",
+      "description": "Stipendio minimo annuo lordo"
+    },
+    "salary_max": {
+      "type": "number",
+      "description": "Stipendio massimo annuo lordo"
+    },
+    "description": {
+      "type": "string",
+      "description": "Descrizione completa dell'offerta"
+    },
+    "requirements": {
+      "type": "string",
+      "description": "Requisiti richiesti"
+    },
+    "benefits": {
+      "type": "string",
+      "description": "Benefit offerti"
+    },
+    "apply_url": {
+      "type": "string",
+      "description": "URL per candidarsi"
+    },
+    "source": {
+      "type": "string",
+      "description": "Fonte dell'offerta (nome feed XML o manuale)"
+    },
+    "external_id": {
+      "type": "string",
+      "description": "ID esterno dal feed XML"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    },
+    "is_featured": {
+      "type": "boolean",
+      "default": false
+    },
+    "expiry_date": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "required": [
+    "title",
+    "company"
+  ]
+}

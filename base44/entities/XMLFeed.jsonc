@@ -1,0 +1,47 @@
+{
+  "name": "XMLFeed",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Nome del feed (es. nome cliente)"
+    },
+    "url": {
+      "type": "string",
+      "description": "URL del feed XML"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused",
+        "error"
+      ],
+      "default": "active"
+    },
+    "last_import_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "total_jobs_imported": {
+      "type": "number",
+      "default": 0
+    },
+    "notes": {
+      "type": "string"
+    },
+    "job_tag": {
+      "type": "string",
+      "default": "job",
+      "description": "Tag XML che racchiude ogni annuncio (default: job)"
+    },
+    "field_mapping": {
+      "type": "string",
+      "description": "Regole di mappatura campi in formato JSON"
+    }
+  },
+  "required": [
+    "name",
+    "url"
+  ]
+}

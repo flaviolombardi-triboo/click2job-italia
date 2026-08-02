@@ -1,0 +1,56 @@
+{
+  "name": "Profession",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Nome della professione"
+    },
+    "slug": {
+      "type": "string",
+      "description": "Slug URL-friendly"
+    },
+    "sector": {
+      "type": "string",
+      "description": "Settore di appartenenza"
+    },
+    "description": {
+      "type": "string",
+      "description": "Descrizione della professione"
+    },
+    "avg_salary_monthly": {
+      "type": "number",
+      "description": "Stipendio medio mensile netto in euro"
+    },
+    "avg_salary_yearly": {
+      "type": "number",
+      "description": "Stipendio medio annuo lordo in euro"
+    },
+    "salary_deviation_pct": {
+      "type": "number",
+      "description": "Scostamento % dalla media nazionale"
+    },
+    "education_required": {
+      "type": "string",
+      "description": "Livello di istruzione richiesto"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Competenze chiave"
+    },
+    "related_professions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Professioni correlate"
+    }
+  },
+  "required": [
+    "name",
+    "sector"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "name": "ImportLog",
+  "type": "object",
+  "properties": {
+    "feed_id": {
+      "type": "string",
+      "description": "ID del feed XML"
+    },
+    "feed_name": {
+      "type": "string",
+      "description": "Nome del feed"
+    },
+    "jobs_imported": {
+      "type": "number",
+      "default": 0,
+      "description": "Annunci importati in questa sessione"
+    },
+    "jobs_skipped": {
+      "type": "number",
+      "default": 0,
+      "description": "Annunci saltati (duplicati)"
+    },
+    "chunks_processed": {
+      "type": "number",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "partial",
+        "error"
+      ],
+      "default": "success"
+    },
+    "error_message": {
+      "type": "string"
+    },
+    "duration_seconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "feed_id",
+    "feed_name"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "name": "FeedChunk",
+  "type": "object",
+  "properties": {
+    "feed_id": {
+      "type": "string",
+      "description": "ID del XMLFeed di riferimento"
+    },
+    "feed_name": {
+      "type": "string",
+      "description": "Nome del feed"
+    },
+    "chunk_index": {
+      "type": "number",
+      "description": "Indice del chunk"
+    },
+    "xml_content": {
+      "type": "string",
+      "description": "XML grezzo dei job in questo chunk"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "processing",
+        "done",
+        "error"
+      ],
+      "default": "pending",
+      "description": "Stato del chunk"
+    },
+    "jobs_imported": {
+      "type": "number",
+      "default": 0
+    },
+    "error_message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "feed_id",
+    "xml_content"
+  ]
+}
